@@ -1,4 +1,4 @@
-extern crate coinbase_pro_rs;
+extern crate coinbase_pro_one_rs;
 extern crate serde_json;
 extern crate tokio;
 
@@ -237,7 +237,7 @@ fn test_full() {
 
 #[test]
 fn test_user() {
-    use coinbase_pro_rs::{Private, ASync, SANDBOX_URL, WSError};
+    use coinbase_pro_rs::{Private, ASync, SANDBOX_URL, Error};
 
     delay();
 
@@ -257,7 +257,7 @@ fn test_user() {
                     Ok(())
                 })
                 .map_err(|_| {
-                    WSError::Read(tokio_tungstenite::tungstenite::Error::Utf8) // hm
+                    Error::Read(tokio_tungstenite::tungstenite::Error::Utf8) // hm
                 });
             futures::future::Either::A(res)
         } else {

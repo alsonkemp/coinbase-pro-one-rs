@@ -2,89 +2,34 @@
 [![Crates.io](https://img.shields.io/crates/v/coinbase-pro-rs.svg)](https://crates.io/crates/coinbase-pro-rs)
 [![Docs.rs](https://docs.rs/coinbase-pro-rs/badge.svg)](https://docs.rs/coinbase-pro-rs)
 
-# Coinbase pro client for Rust
-Supports SYNC/ASYNC/Websocket-feed data support
+# HEAVILY Derived (err... copied...) from:
 
-## Features
-- private and public API
-- sync and async support
-- websocket-feed support
+https://github.com/inv2004/coinbase-pro-rs
 
-## Examples
+This repo/project has the following objective (which differs from those of the original):
+* One mechanism to rule them all.
+  * No (significant) exposure of REST sync versus async or websocket functionality.
+  * All functionality is exposed in one async mechanism.
+    * REST or websockets are used as appropriate.
+  * All responses have a consistent return (whether delivered in response to a RESTful HTTP request or to a Websocket subscription).
+
+# Coinbase Pro One client for Rust
+* Supports async data only
+* Public/private feeds are supported
+
+# Usage
 Cargo.toml:
 ```toml
 [dependencies]
-coinbase-pro-rs = "0.5.1"
+coinbase-pro-one-rs = "0.0.1"
 ```
 
-### Async
-```rust
-extern crate hyper;
-extern crate tokio;
-extern crate coinbase_pro_rs;
+# Examples
 
-use hyper::rt::Future;
-use coinbase_pro_rs::{Public, ASync, SANDBOX_URL};
+See `/examples`.
 
-fn main() {
-    let client: Public<ASync> = Public::Public::new_with_keep_alive(SANDBOX_URL, false);
-    // if keep_alive is not disables - tokio::run will hold the connection without exiting the example
-    let f = client.get_time()
-        .map_err(|_| ())
-        .and_then(|time| {
-            println!("Coinbase.time: {}", time.iso);
-            Ok(())
-        });
-
-    tokio::run(f); // waiting for tokio
-}
-```
-### Sync
-```rust
-extern crate coinbase_pro_rs;
-
-use coinbase_pro_rs::{Public, Sync, SANDBOX_URL};
-
-fn main() {
-   let client: Public<Sync> = Public::new(SANDBOX_URL);
-   let time = client.get_time().unwrap();
-   println!("Coinbase.time: {}", time.iso);
-}
-```
-### Websocket
-```rust
-extern crate futures;
-extern crate tokio;
-extern crate coinbase_pro_rs;
-
-use futures::{Future, Stream};
-use coinbase_pro_rs::{WSFeed, WS_SANDBOX_URL};
-use coinbase_pro_rs::structs::wsfeed::*;
-
-fn main() {
-    let stream = WSFeed::new(WS_SANDBOX_URL,
-        &["BTC-USD"], &[ChannelType::Heartbeat]);
-
-    let f = stream
-        .take(10)
-        .for_each(|msg| {
-        match msg {
-            Message::Heartbeat {sequence, last_trade_id, time, ..} => println!("{}: seq:{} id{}",
-                                                                               time, sequence, last_trade_id),
-            Message::Error {message} => println!("Error: {}", message),
-            Message::InternalError(_) => panic!("internal_error"),
-            other => println!("{:?}", other)
-        }
-        Ok(())
-    });
-
-    tokio::run(f.map_err(|_| panic!("stream fail")));
-}
-```
-
-## Api supported:
-- [x] SYNC
-- [x] ASYNC
+## Coinbase Pro functionality supported:
+- [x] Async
 - [x] Websocket-Feed
 
 ## API
@@ -94,8 +39,8 @@ fn main() {
 - [x] Private
   - [x] Authentication
   - [x] Accounts
-  - [x] Orders
-  - [x] Fills
+  - [ ] Orders
+  - [ ] Fills
   - [ ] Deposits
   - [ ] Withdrawals
   - [ ] Payment Methods
@@ -114,12 +59,9 @@ fn main() {
   - [x] matches
   - [x] full
 
-## FIX API
-by request
+# FIX API
+See https://github.com/inv2004/coinbase-pro-rs for FIX requests.
 
-## OrderBook
-<https://github.com/inv2004/orderbook-rs>
+# OrderBook
+See  https://github.com/inv2004/orderbook-rs (for `coinbase-pro-rs`) and/or `/examples` (for `coinbase-pro-one-rs`).
 
-### Tests
-cargo test -- --test-threads=1
-// to avoid "Rate limit exceeded" error

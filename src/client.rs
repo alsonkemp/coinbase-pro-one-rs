@@ -1,39 +1,121 @@
-//! Contains structure which provides access to Private section of Coinbase api
-
-extern crate base64;
-extern crate hmac;
-extern crate serde;
-extern crate sha2;
-extern crate tokio;
-
+// globals
+use chrono::SecondsFormat;
+// use futures::Future as FFuture;
+use futures::{TryFutureExt, FutureExt};
+use hmac::*;
+use hyper::{Body as HBody, Request as HRequest};
+use hyper::Client as HClient;
+use hyper::client::HttpConnector;
 use hyper::header::HeaderValue;
-use hyper::rt::Future;
-use hyper::{Body, Method, Request, Uri};
-use private::hmac::{Hmac, Mac};
+use hyper::Method;
+// use hyper::rt;
+use hyper_tls::HttpsConnector;
+use serde::Deserialize;
 use serde_json;
+// use std::cell::RefCell;
+use std::fmt::Debug;
 use std::time::{SystemTime, UNIX_EPOCH};
+// use tokio::runtime::Runtime;
+use tokio_tungstenite::connect_async;
+use tokio_tungstenite::tungstenite::Message as TMessage;
+use url;
 use uuid::Uuid;
 
-use adapters::{Adapter, AdapterNew};
-use error::*;
-use structs::private::*;
-use structs::reqs;
+use errors::Error;
+use errors::CBError;
+use structs::*;
 
-use public::Public;
+pub type Stream = Box<dyn futures::Stream<Item=Message>>;
 
-pub struct Private<Adapter> {
-    _pub: Public<Adapter>,
+pub struct Client {
+    client: HClient<HttpsConnector<HttpConnector>>,
+    stream: Stream,
     key: String,
-    secret: String,
     passphrase: String,
+    secret: String,
+    uri: String,
 }
 
-impl<A> Private<A> {
-    pub fn sign(secret: &str, timestamp: u64, method: Method, uri: &str, body_str: &str) -> String {
-        let key = base64::decode(secret).expect("base64::decode secret");
-        let mut mac: Hmac<sha2::Sha256> = Hmac::new_varkey(&key).expect("Hmac::new(key)");
-        mac.input((timestamp.to_string() + method.as_str() + uri + body_str).as_bytes());
-        base64::encode(&mac.result().code())
+type Result = hyper::client::ResponseFuture;
+
+impl Client {
+    const USER_AGENT: &'static str =
+        concat!("coinbase-pro-rs/", env!("CARGO_PKG_VERSION"));
+    pub fn new(
+        uri: &str,
+        key: &str, secret: &str, passphrase: &str,
+        product_ids: &[&str],
+        channels: &[ChannelType],
+    ) -> impl futures::Stream<Item=Message> {
+        let https = HttpsConnector::new().unwrap();
+        let client = Client::builder()
+            .build::<_, HBody>(https);
+        let uri = uri.to_string();
+        let url = url::Url::parse(uri.into()).unwrap();
+
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("leap-second")
+            .as_secs();
+        let signature = Client::sign(secret, timestamp, Method::GET, "/users/self/verify", "");
+
+        let auth = Auth {
+            signature,
+            key: key.to_string(),
+            passphrase: passphrase.to_string(),
+            timestamp: timestamp.to_string(),
+        };
+
+        let subscribe = Subscribe {
+            _type: SubscribeCmd::Subscribe,
+            product_ids: product_ids.into_iter().map(|x| x.to_string()).collect(),
+            channels: channels
+                .to_vec()
+                .into_iter()
+                .map(|x| Channel::Name(x))
+                .collect::<Vec<_>>(),
+            auth: Some(auth),
+        }.into();
+
+        let stream = connect_async(url)
+            .map_err(Error::Connect)
+            .and_then(move |(ws_stream, _)| {
+                debug!("WebSocket handshake has been successfully completed");
+                let (sink, stream) = ws_stream.split();
+
+                sink.send(TMessage::Text(subscribe))
+                    .map_err(Error::Send)
+                    .and_then(|_| {
+                        debug!("subsription sent");
+                        let stream = stream
+                            .filter(|msg| msg.is_text())
+                            .map_err(Error::Read)
+                            .map(convert_msg);
+                        Ok(stream)
+                    })
+            }).flatten_stream();
+
+        Self {
+            uri: String::from(uri),
+            stream,
+            client,
+            key: key.to_string(),
+            secret: secret.to_string(),
+            passphrase: passphrase.to_string(),
+        }
+    }
+
+    /// **Core Requests**
+    ///
+    ///
+    ///
+    fn call<U>(&self, method: Method, uri: &str, body_str: &str) -> Result
+        where
+            U: Send + 'static,
+            for<'de> U: serde::Deserialize<'de>
+    {
+        self._pub
+            .call(self.request(method, uri, body_str.to_string()))
     }
 
     fn call_feature<U>(
@@ -41,31 +123,52 @@ impl<A> Private<A> {
         method: Method,
         uri: &str,
         body_str: &str,
-    ) -> impl Future<Item = U, Error = CBError>
-    where
-        for<'de> U: serde::Deserialize<'de>,
-    {
+    ) -> impl hyper::rt::Executor<Item=U, Error=CBError>
+        where
+                for<'de> U: serde::Deserialize<'de>, {
         self._pub
             .call_future(self.request(method, uri, body_str.to_string()))
     }
-
-    fn call<U>(&self, method: Method, uri: &str, body_str: &str) -> A::Result
-    where
-        A: Adapter<U> + 'static,
-        U: Send + 'static,
-        for<'de> U: serde::Deserialize<'de>,
+    pub fn call_future<U>(
+        &self,
+        request: HRequest<HBody>,
+    ) -> impl futures::Future<Item=U, Error=CBError>
+        where
+                for<'de> U: serde::Deserialize<'de>,
     {
-        self._pub
-            .call(self.request(method, uri, body_str.to_string()))
+        debug!("REQ: {:?}", request);
+
+        self.client
+            .request(request)
+            .map_err(CBError::Http)
+            .and_then(|res| res.into_body().concat2().map_err(CBError::Http))
+            .and_then(|body| {
+                debug!("RES: {:?}", body);
+                let res = serde_json::from_slice(&body).map_err(|e| {
+                    serde_json::from_slice(&body)
+                        .map(CBError::Coinbase)
+                        .unwrap_or_else(|_| {
+                            let data = String::from_utf8(body.to_vec()).unwrap();
+                            CBError::Serde { error: e, data }
+                        })
+                })?;
+                Ok(res)
+            })
     }
 
-    fn call_get<U>(&self, uri: &str) -> A::Result
-    where
-        A: Adapter<U> + 'static,
-        U: Send + 'static,
-        for<'de> U: serde::Deserialize<'de>,
-    {
-        self.call(Method::GET, uri, "")
+    fn call_get<U>(&self, uri: &str, body: Option<&str>) -> Result
+        where
+            U: Send + 'static,
+            for<'de> U: serde::Deserialize<'de> {
+        let bd = str_or_blank(body);
+        self.call(Method::GET, uri, bd)
+    }
+    fn call_post<U>(&self, uri: &str, body: Option<&str>) -> Result
+        where
+            U: Send + 'static,
+            for<'de> U: serde::Deserialize<'de> {
+        let bd = str_or_blank(body);
+        self.call(Method::POST, uri, bd)
     }
 
     //   from python
@@ -83,21 +186,21 @@ impl<A> Private<A> {
     //CB-ACCESS-PASSPHRASE: sandbox
     //
     //{"product_id": "BTC-USD", "side": "buy", "type": "limit", "price": "100.00", "size": "0.01"}
-    fn request(&self, method: Method, _uri: &str, body_str: String) -> Request<Body> {
+    fn request(&self, method: Method, _uri: &str, body_str: String) -> HRequest<HBody> {
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("leap-second")
             .as_secs();
 
-        let uri: Uri = (self._pub.uri.to_string() + _uri).parse().unwrap();
+        let uri: hyper::Uri = (self._pub.uri.to_string() + _uri).parse().unwrap();
 
-        let mut req = Request::builder();
+        let mut req = HRequest::builder();
         req.method(&method);
         req.uri(uri);
 
         let sign = Self::sign(&self.secret, timestamp, method, _uri, &body_str);
 
-        req.header("User-Agent", Public::<A>::USER_AGENT);
+        req.header("User-Agent", Self::USER_AGENT);
         req.header("Content-Type", "Application/JSON");
         //        req.header("Accept", "*/*");
         req.header("CB-ACCESS-KEY", HeaderValue::from_str(&self.key).unwrap());
@@ -114,29 +217,13 @@ impl<A> Private<A> {
         req.body(body_str.into()).unwrap()
     }
 
-    /// Creates a new Private struct
-    pub fn new(uri: &str, key: &str, secret: &str, passphrase: &str) -> Self
-    where
-        A: AdapterNew
-    {
-        Self {
-            _pub: Public::new(uri),
-            key: key.to_string(),
-            secret: secret.to_string(),
-            passphrase: passphrase.to_string(),
-        }
-    }
-
     /// **Get an Account**
     ///
     /// Get a list of trading accounts
     ///
     /// # API Key Permissions
     /// This endpoint requires either the “view” or “trade” permission.
-    pub fn get_accounts(&self) -> A::Result
-    where
-        A: Adapter<Vec<Account>> + 'static,
-    {
+    pub fn get_accounts(&self) -> Result {
         self.call_get("/accounts")
     }
 
@@ -154,10 +241,7 @@ impl<A> Private<A> {
     /// | balance |	total funds in the account |
     /// | holds |	funds on hold (not available for use) |
     /// | available |	funds available to withdraw or trade |
-    pub fn get_account(&self, account_id: Uuid) -> A::Result
-    where
-        A: Adapter<Account> + 'static,
-    {
+    pub fn get_account(&self, account_id: Uuid) -> Result {
         self.call_get(&format!("/accounts/{}", account_id))
     }
 
@@ -180,10 +264,7 @@ impl<A> Private<A> {
     /// # Details
     ///
     /// If an entry is the result of a trade (match, fee), the details field will contain additional information about the trade.
-    pub fn get_account_hist(&self, id: Uuid) -> A::Result
-    where
-        A: Adapter<Vec<AccountHistory>> + 'static,
-    {
+    pub fn get_account_hist(&self, id: Uuid) -> Result {
         let f = self
             .call_feature(Method::GET, &format!("/accounts/{}/ledger", id), "")
             .map(|xs: Vec<AccountHistory>| {
@@ -212,19 +293,13 @@ impl<A> Private<A> {
     /// # Ref
     /// The ref field contains the id of the order or transfer which created the hold.
     ///
-    pub fn get_account_holds(&self, id: Uuid) -> A::Result
-    where
-        A: Adapter<Vec<AccountHolds>> + 'static,
-    {
+    pub fn get_account_holds(&self, id: Uuid) -> Result {
         self.call_get(&format!("/accounts/{}/holds", id))
     }
 
     /// **Make Order**
     /// General function. Can be used to use own generated `Order` structure for order
-    pub fn set_order(&self, order: reqs::Order) -> A::Result
-    where
-        A: Adapter<Order> + 'static,
-    {
+    pub fn order(&self, order: Order) -> Result {
         let body_str = serde_json::to_string(&order).expect("cannot to_string post body");
 
         self.call(Method::POST, "/orders", &body_str)
@@ -237,17 +312,14 @@ impl<A> Private<A> {
         product_id: &str,
         size: f64,
         price: f64,
-        post_only: bool
-    ) -> A::Result
-    where
-        A: Adapter<Order> + 'static,
-    {
-        self.set_order(reqs::Order::limit(
+        post_only: bool,
+    ) -> Result {
+        self.order(Order::limit(
             product_id,
-            reqs::OrderSide::Buy,
+            OrderSide::Buy,
             size,
             price,
-            post_only
+            post_only,
         ))
     }
 
@@ -258,36 +330,27 @@ impl<A> Private<A> {
         product_id: &str,
         size: f64,
         price: f64,
-        post_only: bool
-    ) -> A::Result
-    where
-        A: Adapter<Order> + 'static,
-    {
-        self.set_order(reqs::Order::limit(
+        post_only: bool,
+    ) -> Result {
+        self.order(Order::limit(
             product_id,
-            reqs::OrderSide::Sell,
+            OrderSide::Sell,
             size,
             price,
-            post_only
+            post_only,
         ))
     }
 
     /// **Buy market**
     /// Makes Buy marker order
-    pub fn buy_market(&self, product_id: &str, size: f64) -> A::Result
-    where
-        A: Adapter<Order> + 'static,
-    {
-        self.set_order(reqs::Order::market(product_id, reqs::OrderSide::Buy, size))
+    pub fn buy_market(&self, product_id: &str, size: f64) -> Result {
+        self.order(Order::market(product_id, OrderSide::Buy, size))
     }
 
     /// **Sell market**
     /// Makes Sell marker order
-    pub fn sell_market(&self, product_id: &str, size: f64) -> A::Result
-    where
-        A: Adapter<Order> + 'static,
-    {
-        self.set_order(reqs::Order::market(product_id, reqs::OrderSide::Sell, size))
+    pub fn sell_market(&self, product_id: &str, size: f64) -> Result {
+        self.order(Order::market(product_id, OrderSide::Sell, size))
     }
 
     //    pub fn buy<'a>(&self) -> OrderBuilder<'a> {}    // TODO: OrderBuilder
@@ -299,10 +362,7 @@ impl<A> Private<A> {
     /// If the order had no matches during its lifetime its record may be purged. This means the order details will not be available with GET /orders/<order-id>.
     /// # API Key Permissions
     /// This endpoint requires the “trade” permission.
-    pub fn cancel_order(&self, id: Uuid) -> A::Result
-    where
-        A: Adapter<Uuid> + 'static,
-    {
+    pub fn cancel_order(&self, id: Uuid) -> Result {
         let f = self
             .call_feature(Method::DELETE, dbg!(&format!("/orders/{}", id)), "");
 
@@ -320,10 +380,7 @@ impl<A> Private<A> {
     /// | Param |	Default |	Description |
     /// | ----- | --------- | ------------- |
     /// | product_id |	*optional* |	Only cancel orders open for a specific product |
-    pub fn cancel_all(&self, product_id: Option<&str>) -> A::Result
-    where
-        A: Adapter<Vec<Uuid>> + 'static,
-    {
+    pub fn cancel_all(&self, product_id: Option<&str>) -> Result {
         let param = product_id
             .map(|x| format!("?product_id={}", x))
             .unwrap_or_default();
@@ -344,10 +401,7 @@ impl<A> Private<A> {
     /// | ------ | -------- | ------------ |
     /// | status |	*open*, *pending*, *active* | 	Limit list of orders to these statuses. Passing all returns orders of all statuses. |
     /// | product_id |	*optional* |	Only list orders for a specific product |
-    pub fn get_orders(&self, status: Option<OrderStatus>, product_id: Option<&str>) -> A::Result
-    where
-        A: Adapter<Vec<Order>> + 'static,
-    {
+    pub fn get_orders(&self, status: Option<OrderStatus>, product_id: Option<&str>) -> Result {
         // TODO rewrite
         let param_status = status.map(|x| format!("&status={}", x)).unwrap_or_default();
         let param_product = product_id
@@ -369,10 +423,7 @@ impl<A> Private<A> {
     /// This endpoint requires either the “view” or “trade” permission.
     ///
     /// If the order is canceled the response may have status code 404 if the order had no matches.
-    pub fn get_order(&self, id: Uuid) -> A::Result
-    where
-        A: Adapter<Order> + 'static,
-    {
+    pub fn get_order(&self, id: Uuid) -> Result {
         self.call_get(&format!("/orders/{}", id))
     }
 
@@ -383,10 +434,7 @@ impl<A> Private<A> {
     /// # API Key Permissions
     /// This endpoint requires either the “view” or “trade” permission.
     /// **DEPRECATION NOTICE** - Requests without either order_id or product_id will be rejected after 8/23/18.
-    pub fn get_fills(&self, order_id: Option<Uuid>, product_id: Option<&str>) -> A::Result
-    where
-        A: Adapter<Vec<Fill>> + 'static,
-    {
+    pub fn get_fills(&self, order_id: Option<Uuid>, product_id: Option<&str>) -> Result {
         let param_order = order_id
             .map(|x| format!("&order_id={}", x))
             .unwrap_or_default();
@@ -407,14 +455,106 @@ impl<A> Private<A> {
     ///
     /// #API Key Permissions
     /// This endpoint requires either the “view” or “trade” permission.
-    pub fn get_trailing_volume(&self) -> A::Result
-    where
-        A: Adapter<Vec<TrailingVolume>> + 'static,
-    {
+    pub fn get_trailing_volume(&self) -> Result {
         self.call_get("/users/self/trailing-volume")
     }
 
-    pub fn public(&self) -> &Public<A> {
-        &self._pub
+    fn pub_request(&self, uri: &str) -> HRequest<HBody> {
+        let uri: hyper::Uri = (self.pub_uri.to_string() + uri).parse().unwrap();
+
+        let mut req = HRequest::get(uri);
+        req.header("User-Agent", Self::USER_AGENT);
+        req.body(HBody::empty()).unwrap()
+    }
+
+    fn get_pub<U>(&self, uri: &str) -> Result
+        where
+            U: Send + 'static,
+            for<'de> U: serde::Deserialize<'de>,
+    {
+        self.call(self.request(uri))
+    }
+
+    pub fn get_time(&self) -> Result {
+        self.get_pub("/time")
+    }
+
+    pub fn get_products(&self) -> Result {
+        self.get_pub("/products")
+    }
+
+    pub fn get_book<T>(&self, product_id: &str) -> Result
+        where
+            T: BookLevel + Debug + 'static,
+            T: super::std::marker::Send,
+            T: for<'de> Deserialize<'de>,
+    {
+        self.get_pub(&format!(
+            "/products/{}/book?level={}",
+            product_id,
+            T::level()
+        ))
+    }
+
+    pub fn get_ticker(&self, product_id: &str) -> Result {
+        self.get_pub(&format!("/products/{}/ticker", product_id))
+    }
+
+    pub fn get_trades(&self, product_id: &str) -> Result {
+        self.get_pub(&format!("/products/{}/trades", product_id))
+    }
+
+    pub fn get_candles(
+        &self,
+        product_id: &str,
+        start: Option<DateTime>,
+        end: Option<DateTime>,
+        granularity: Granularity,
+    ) -> Result {
+        let param_start = start
+            .map(|x| format!("&start={}", x.to_rfc3339_opts(SecondsFormat::Secs, true)))
+            .unwrap_or_default();
+        let param_end = end
+            .map(|x| format!("&end={}", x.to_rfc3339_opts(SecondsFormat::Secs, true)))
+            .unwrap_or_default();
+
+        let req = format!(
+            "/products/{}/candles?granularity={}{}{}",
+            product_id, granularity as usize, param_start, param_end
+        );
+        self.get_pub(&req)
+    }
+
+    pub fn get_stats24h(&self, product_id: &str) -> Result {
+        self.get_pub(&format!("/products/{}/stats", product_id))
+    }
+
+    pub fn get_currencies(&self) -> Result {
+        self.get_pub("/currencies")
+    }
+    pub fn sign(secret: &str, timestamp: u64, method: Method, uri: &str, body_str: &str) -> String {
+        let key = base64::decode(secret).expect("base64::decode secret");
+        let mut mac: hmac::Hmac<sha2::Sha256> = hmac::Mac::new_varkey(&key).expect("Hmac::new(key)");
+        mac.input((timestamp.to_string() + method.as_str() + uri + body_str).as_bytes());
+        base64::encode(&mac.result().code())
+    }
+}
+
+fn convert_msg(msg: TMessage) -> Message {
+    match msg {
+        TMessage::Text(str) => serde_json::from_str(&str).unwrap_or_else(|e| {
+            Message::InternalError(Error::Serde {
+                error: e,
+                data: str,
+            })
+        }),
+        _ => unreachable!(), // filtered in stream
+    }
+}
+
+fn str_or_blank(v: Option<&str>) -> &str {
+    match v {
+        Some(s) => s,
+        None => ""
     }
 }
