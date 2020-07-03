@@ -1,5 +1,4 @@
 
-extern crate chrono;
 #[macro_use]
 extern crate failure;
 extern crate futures;
@@ -19,12 +18,16 @@ extern crate tokio_tungstenite;
 extern crate uuid;
 extern crate url;
 
+
 pub mod client;
-pub mod errors;
+pub mod error;
 pub mod structs;
 mod utils;
 
-pub type Result<T> = std::result::Result<T, errors::CBError>;
+
+use futures::Future;
+
+pub type Result<T> = Future<Item=T, Error=error::Error>;
 
 pub const MAIN_URL: &str = "https://api.pro.coinbase.com";
 pub const SANDBOX_URL: &str = "https://api-public.sandbox.pro.coinbase.com";
