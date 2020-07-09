@@ -3,11 +3,13 @@ name = "coinbase-pro-one-rs"
 version = "0.0.1"
 authors = ["ae <alson@alsonkemp.com>"]
 repository = "https://github.com/alsonkemp/coinbase-pro-one-rs"
-description = "Async Coinbase pro client for Rust (fused WS+REST) "
+description = "Async Coinbase pro client for Rust (fused WS+REST) (See: coinbase-pro-rs)"
 license = "MIT/Apache-2.0"
 readme = "README.md"
 categories = [ "api-bindings", "cryptography::cryptocurrencies" ]
 keywords = [ "async", "exchange", "coinbase", "bitcoin", "websocket" ]
+homepage = "https://github.com/alsonkemp/coinbase-pro-one-rs"
+publish = false
 
 [dependencies]
 async-std = "1.6.2"
