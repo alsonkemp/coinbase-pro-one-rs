@@ -4,6 +4,8 @@ NOTE: needs a bit commit from my other computer...
 
 https://github.com/inv2004/coinbase-pro-rs
 
+# Objectives
+
 This repo/project has the following objective (which differs from those of the original):
 * One mechanism to rule them all.
   * No (significant) exposure of REST sync versus async or websocket functionality.
