@@ -1,7 +1,11 @@
 
+extern crate async_std;
+extern crate async_tungstenite;
+extern crate chrono;
 #[macro_use]
 extern crate failure;
 extern crate futures;
+extern crate futures_channel;
 extern crate hmac;
 extern crate hyper;
 extern crate hyper_tls;
@@ -13,8 +17,7 @@ extern crate serde;
 extern crate serde_derive;
 extern crate serde_json;
 extern crate time;
-extern crate tokio;
-extern crate tokio_tungstenite;
+extern crate tungstenite;
 extern crate uuid;
 extern crate url;
 
@@ -24,10 +27,6 @@ pub mod error;
 pub mod structs;
 mod utils;
 
-
-use futures::Future;
-
-pub type Result<T> = Future<Item=T, Error=error::Error>;
 
 pub const MAIN_URL: &str = "https://api.pro.coinbase.com";
 pub const SANDBOX_URL: &str = "https://api-public.sandbox.pro.coinbase.com";

@@ -10,10 +10,13 @@ categories = [ "api-bindings", "cryptography::cryptocurrencies" ]
 keywords = [ "async", "exchange", "coinbase", "bitcoin", "websocket" ]
 
 [dependencies]
+async-std = "1.6.2"
+async-tungstenite = { version = "0.7.0", features = ["async-std-runtime"] }
 base64 = ""
 chrono = { version = "", features = [ "serde" ] }
 failure = ""
 futures = ""
+futures-channel = ""
 hmac = ""
 hyper = ""
 hyper-tls = ""
@@ -23,9 +26,8 @@ serde = ""
 serde_json = ""
 serde_derive = ""
 sha2 = ""
+tungstenite = ""
 time = ""
-tokio = ""
-tokio-tungstenite = ""
 url = ""
 uuid = { version = "", features = [ "serde", "v4" ] }
 

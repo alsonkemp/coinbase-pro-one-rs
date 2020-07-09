@@ -10,7 +10,7 @@ use utils::f64_opt_from_string;
 use utils::uuid_opt_from_string;
 use uuid::Uuid;
 
-use errors;
+use error;
 use structs::OrderTimeInForce::GTC;
 
 // Type aliases
@@ -244,8 +244,7 @@ pub struct Change {
     #[serde(deserialize_with = "uuid_opt_from_string")]
     pub profile_id: Option<Uuid>,
 }
-
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Serialize, Deserialize, Debug)]
 #[serde(untagged)]
 pub enum Channel {
     Name(ChannelType),
@@ -255,7 +254,7 @@ pub enum Channel {
     },
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub enum ChannelType {
     Heartbeat,
@@ -263,8 +262,9 @@ pub enum ChannelType {
     Level2,
     Matches,
     Full,
-    User,
+    User
 }
+
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Currency {
@@ -420,7 +420,7 @@ pub(crate) enum InputMessage {
     Error {
         message: String,
     },
-    InternalError(errors::Error),
+    InternalError(error::Error),
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -471,7 +471,7 @@ pub enum Message {
     Error {
         message: String,
     },
-    InternalError(errors::Error), // in futures 0.3 probably TryStream
+    InternalError(error::Error), // in futures 0.3 probably TryStream
 }
 
 impl From<InputMessage> for Message {
@@ -645,7 +645,7 @@ impl<'a> Order<'a> {
     pub fn time_in_force(self, time_in_force: OrderTimeInForce) -> Self {
         match self._type {
             OrderType::Limit { price, size, post_only, .. } => {
-                let _type = OrderType::Limit { price, size, post_only, time_in_force: time_in_force };
+                let _type = OrderType::Limit { price, size, post_only, time_in_force };
                 Order { _type, ..self }
             }
             _ => panic!("time_in_force is for limit orders only")
@@ -687,7 +687,7 @@ impl<'a> Order<'a> {
     ) -> Self {
         Order {
             _type: OrderType::Market {
-                size: size,
+                size,
                 funds: 0.0,
             },
             client_oid: None,
@@ -976,6 +976,7 @@ pub struct Trade {
     pub size: f64,
     pub side: OrderSide,
 }
+
 
 #[cfg(test)]
 mod tests {

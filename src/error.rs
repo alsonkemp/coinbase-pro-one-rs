@@ -6,11 +6,11 @@ pub enum Error {
     #[fail(display = "http: {}", _0)]
     Http(#[cause] super::hyper::Error),
     #[fail(display = "connect")]
-    Connect(#[cause] super::tokio_tungstenite::tungstenite::Error),
-    #[fail(display = "send")]
-    Send(#[cause] super::tokio_tungstenite::tungstenite::Error),
+    Connect(#[cause] super::tungstenite::Error),
+    #[fail(display = "send") ]
+    Send(#[cause] super::tungstenite::Error),
     #[fail(display = "read")]
-    Read(#[cause] super::tokio_tungstenite::tungstenite::Error),
+    Read(#[cause] super::tungstenite::Error),
     #[fail(display = "serde: {}\n    {}", error, data)]
     Serde {
         #[cause]
@@ -31,7 +31,7 @@ impl fmt::Display for Error {
     }
 }
 
-impl<'de> Deserialize<'de> for WSError {
+impl<'de> Deserialize<'de> for Error {
     fn deserialize<D>(_deserializer: D) -> Result<WSError, D::Error>
     where
         D: Deserializer<'de>,
