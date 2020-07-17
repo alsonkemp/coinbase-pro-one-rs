@@ -1,56 +1,66 @@
 use chrono;
-use serde::{Deserialize, Deserializer};
+use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::borrow::Cow;
-// use utils::datetime_from_string;
-use utils::usize_from_string;
-use utils::f64_from_string;
-use utils::f64_nan_from_string;
-use utils::f64_opt_from_string;
-use utils::uuid_opt_from_string;
+
 use uuid::Uuid;
 
-use error;
-use structs::OrderTimeInForce::GTC;
+// use utils::datetime_from_string;
+use crate::utils::f64_from_string;
+use crate::utils::f64_nan_from_string;
+use crate::utils::f64_opt_from_string;
+use crate::utils::usize_from_string;
+use crate::utils::uuid_opt_from_string;
+use crate::errors;
+
+//////////////////////////////////////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////////////////////
+// ALPHABETIZE ALPHABETIZE ALPHABETIZE ALPHABETIZE ALPHABETIZE ALPHABETIZE ALPHABETIZE
+// ALPHABETIZE ALPHABETIZE ALPHABETIZE ALPHABETIZE ALPHABETIZE ALPHABETIZE ALPHABETIZE
+// ALPHABETIZE ALPHABETIZE ALPHABETIZE ALPHABETIZE ALPHABETIZE ALPHABETIZE ALPHABETIZE
+// ALPHABETIZE ALPHABETIZE ALPHABETIZE ALPHABETIZE ALPHABETIZE ALPHABETIZE ALPHABETIZE
+// It's hella easier to find stuff that way...  Note: it ain't complete, yet...
+//////////////////////////////////////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////////////////////
 
 // Type aliases
 pub type DateTime = chrono::DateTime<chrono::Utc>;
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Account {
-    pub id: Uuid,
-    pub currency: String,
-    #[serde(deserialize_with = "f64_from_string")]
-    pub balance: f64,
     #[serde(deserialize_with = "f64_from_string")]
     pub available: f64,
     #[serde(deserialize_with = "f64_from_string")]
+    pub balance: f64,
+    pub currency: String,
+    #[serde(deserialize_with = "f64_from_string")]
     pub hold: f64,
+    pub id: Uuid,
     pub profile_id: Uuid,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct AccountHistory {
-    #[serde(deserialize_with = "usize_from_string")]
-    pub id: usize,
-    pub created_at: DateTime,
+    #[serde(skip_deserializing)]
+    pub _type: AccountHistoryType,
     #[serde(deserialize_with = "f64_from_string")]
     pub amount: f64,
     #[serde(deserialize_with = "f64_from_string")]
     pub balance: f64,
-    #[serde(skip_deserializing)]
-    pub _type: AccountHistoryType,
     #[serde(flatten)]
     pub details: AccountHistoryDetails, // variants are not not clear
+    pub created_at: DateTime,
+    #[serde(deserialize_with = "usize_from_string")]
+    pub id: usize,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
 pub enum AccountHistoryType {
     Fee,
     Match,
+    NotSet,
     Rebate,
     Transfer,
-    NotSet,
 }
 
 impl Default for AccountHistoryType {
@@ -61,7 +71,7 @@ impl Default for AccountHistoryType {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(tag = "type", content = "details")]
-#[serde(rename_all = "camelCase")]
+// #[serde(rename_all = "camelCase")]
 pub enum AccountHistoryDetails {
     Fee {
         order_id: Uuid,
@@ -88,7 +98,7 @@ pub enum AccountHistoryDetails {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
+// #[serde(rename_all = "camelCase")]
 pub enum AccountHistoryDetailsTransferType {
     Deposit,
     Withdraw,
@@ -107,15 +117,15 @@ impl<'a> From<&'a AccountHistoryDetails> for AccountHistoryType {
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct AccountHolds {
-    pub id: Uuid,
-    pub account_id: Uuid,
-    pub created_at: DateTime,
-    pub updated_at: DateTime,
-    pub amount: f64,
-    #[serde(rename = "type")]
-    pub _type: AccountHoldsType,
     #[serde(rename = "ref")]
     pub _ref: Uuid,
+    #[serde(rename = "type")]
+    pub _type: AccountHoldsType,
+    pub amount: f64,
+    pub account_id: Uuid,
+    pub created_at: DateTime,
+    pub id: Uuid,
+    pub updated_at: DateTime,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -387,41 +397,6 @@ pub enum Granularity {
     D1 = 86400,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(tag = "type")]
-#[serde(rename_all = "snake_case")]
-pub(crate) enum InputMessage {
-    Subscriptions {
-        channels: Vec<Channel>,
-    },
-    Heartbeat {
-        sequence: usize,
-        last_trade_id: usize,
-        product_id: String,
-        time: DateTime,
-    },
-    Ticker(Ticker),
-    Snapshot {
-        product_id: String,
-        bids: Vec<Level2SnapshotRecord>,
-        asks: Vec<Level2SnapshotRecord>,
-    },
-    L2update {
-        product_id: String,
-        changes: Vec<Level2UpdateRecord>,
-    },
-    LastMatch(Match),
-    Received(Received),
-    Open(Open),
-    Done(Done),
-    Match(Match),
-    Activate(Activate),
-    Change(Change),
-    Error {
-        message: String,
-    },
-    InternalError(error::Error),
-}
 
 #[derive(Debug, Deserialize, Serialize)]
 pub enum Level2 {
@@ -453,27 +428,87 @@ pub struct Level2UpdateRecord {
     pub size: f64,
 }
 
-#[derive(Debug, Serialize)]
+
+
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(untagged)]
+pub enum MarketType {
+    Size { size: f64 },
+    Funds { funds: f64 },
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct Match {
+    pub sequence: usize,
+    pub maker_order_id: Uuid,
+    pub taker_order_id: Uuid,
+    pub maker_user_id: Option<String>,
+    pub maker_profile_id: Option<Uuid>,
+    #[serde(deserialize_with = "f64_from_string")]
+    pub price: f64,
+    pub product_id: String,
+    #[serde(default)]
+    #[serde(deserialize_with = "uuid_opt_from_string")]
+    pub profile_id: Option<Uuid>,
+    #[serde(deserialize_with = "f64_from_string")]
+    pub size: f64,
+    pub side: OrderSide,
+    pub taker_user_id: Option<String>,
+    pub taker_profile_id: Option<Uuid>,
+    pub time: DateTime,
+    pub trade_id: usize,
+    pub user_id: Option<String>,
+}// limit:{"id":"e9d0ff7a-ed50-4040-87a7-c884ae562807","price":"1.12000000","size":"1.00000000","product_id":"BTC-USD","side":"buy","stp":"dc","type":"limit","time_in_force":"GTC","post_only":true,"created_at":"2018-08-23T18:53:42.144811Z","fill_fees":"0.0000000000000000","filled_size":"0.00000000","executed_value":"0.0000000000000000","status":"pending","settled":false}
+// market:{"id":"ea565dc3-1656-49d7-bcdb-d99981ce35a7","size":"0.00100000","product_id":"BTC-USD","side":"buy","stp":"dc","funds":"28.2449436100000000","type":"market","post_only":false,"created_at":"2018-08-23T18:43:18.964413Z","fill_fees":"0.0000000000000000","filled_size":"0.00000000","executed_value":"0.0000000000000000","status":"pending","settled":false}
+// call:[{"id":"063da13d-6aba-45e1-91ca-89f8514da989","price":"100000.00000000","size":"0.00100000","product_id":"BTC-USD","side":"sell","type":"limit","time_in_force":"GTC","post_only":true,"created_at":"2018-08-24T04:50:01.139098Z","fill_fees":"0.0000000000000000","filled_size":"0.00000000","executed_value":"0.0000000000000000","status":"open","settled":false}]
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(tag = "type")]
 pub enum Message {
-    Subscriptions {
-        channels: Vec<Channel>,
+    Activate(Activate),
+    Change(Change),
+    Done(Done),
+    Error {
+        message: String,
     },
+    Full(Full),
     Heartbeat {
         sequence: usize,
         last_trade_id: usize,
         product_id: String,
         time: DateTime,
     },
-    Ticker(Ticker),
+    L2update {
+        product_id: String,
+        changes: Vec<Level2UpdateRecord>,
+    },
+    #[serde(skip)]
+    InternalError(errors::CBProError),
     Level2(Level2),
     Match(Match),
-    Full(Full),
-    Error {
-        message: String,
+    Open(Open),
+    Received(Received),
+    Subscriptions {
+        channels: Vec<Channel>,
     },
-    InternalError(error::Error), // in futures 0.3 probably TryStream
+    Snapshot {
+        product_id: String,
+        bids: Vec<Level2SnapshotRecord>,
+        asks: Vec<Level2SnapshotRecord>,
+    },
+    Ticker(Ticker),
 }
 
+/*
+impl<'de> Deserialize<'de> for Message {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: Deserializer<'de>,
+    {
+        Deserialize::deserialize(deserializer)
+    }
+}
 impl From<InputMessage> for Message {
     fn from(msg: InputMessage) -> Self {
         match msg {
@@ -518,49 +553,8 @@ impl From<InputMessage> for Message {
         }
     }
 }
+*/
 
-impl<'de> Deserialize<'de> for Message {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-        where
-            D: Deserializer<'de>,
-    {
-        Deserialize::deserialize(deserializer).map(|input_msg: InputMessage| input_msg.into())
-    }
-}
-
-
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(untagged)]
-#[serde(rename_all = "camelCase")]
-pub enum MarketType {
-    Size { size: f64 },
-    Funds { funds: f64 },
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-pub struct Match {
-    pub sequence: usize,
-    pub maker_order_id: Uuid,
-    pub taker_order_id: Uuid,
-    pub maker_user_id: Option<String>,
-    pub maker_profile_id: Option<Uuid>,
-    #[serde(deserialize_with = "f64_from_string")]
-    pub price: f64,
-    pub product_id: String,
-    #[serde(default)]
-    #[serde(deserialize_with = "uuid_opt_from_string")]
-    pub profile_id: Option<Uuid>,
-    #[serde(deserialize_with = "f64_from_string")]
-    pub size: f64,
-    pub side: OrderSide,
-    pub taker_user_id: Option<String>,
-    pub taker_profile_id: Option<Uuid>,
-    pub time: DateTime,
-    pub trade_id: usize,
-    pub user_id: Option<String>,
-}// limit:{"id":"e9d0ff7a-ed50-4040-87a7-c884ae562807","price":"1.12000000","size":"1.00000000","product_id":"BTC-USD","side":"buy","stp":"dc","type":"limit","time_in_force":"GTC","post_only":true,"created_at":"2018-08-23T18:53:42.144811Z","fill_fees":"0.0000000000000000","filled_size":"0.00000000","executed_value":"0.0000000000000000","status":"pending","settled":false}
-// market:{"id":"ea565dc3-1656-49d7-bcdb-d99981ce35a7","size":"0.00100000","product_id":"BTC-USD","side":"buy","stp":"dc","funds":"28.2449436100000000","type":"market","post_only":false,"created_at":"2018-08-23T18:43:18.964413Z","fill_fees":"0.0000000000000000","filled_size":"0.00000000","executed_value":"0.0000000000000000","status":"pending","settled":false}
-// call:[{"id":"063da13d-6aba-45e1-91ca-89f8514da989","price":"100000.00000000","size":"0.00100000","product_id":"BTC-USD","side":"sell","type":"limit","time_in_force":"GTC","post_only":true,"created_at":"2018-08-24T04:50:01.139098Z","fill_fees":"0.0000000000000000","filled_size":"0.00000000","executed_value":"0.0000000000000000","status":"open","settled":false}]
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Open {
@@ -663,7 +657,7 @@ impl<'a> Order<'a> {
                 price,
                 size,
                 post_only,
-                time_in_force: GTC,
+                time_in_force: OrderTimeInForce::GTC,
             },
             client_oid: None,
             created_at: chrono::Utc::now(),

@@ -1,4 +1,3 @@
-extern crate coinbase_pro_rs;
 extern crate serde_json;
 extern crate uuid;
 

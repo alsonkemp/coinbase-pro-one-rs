@@ -1,4 +1,5 @@
 use structs::other::Error;
+use super::serde::{Deserialize, Deserializer};
 
 #[derive(Debug, Fail)]
 pub enum CBError {
@@ -32,7 +33,6 @@ pub enum WSError {
     },
 }
 
-use super::serde::{Deserialize, Deserializer};
 
 impl<'de> Deserialize<'de> for WSError {
     fn deserialize<D>(_deserializer: D) -> Result<WSError, D::Error>

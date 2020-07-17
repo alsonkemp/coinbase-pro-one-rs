@@ -1,53 +1,26 @@
+#!feature(async_closure)]
 
 // STD IMPORTS
-use std::cell::RefCell;
-use std::fmt::Debug;
 use std::time::{SystemTime, UNIX_EPOCH};
-use std::io;
 
 // CRATE IMPORTS
-use async_tungstenite::*;
-use async_tungstenite::{async_std::connect_async, tungstenite::Error, tungstenite::Message as TMessage};
-use chrono::SecondsFormat;
-use futures::{Future, Sink, Stream};
 use futures_channel::mpsc::{unbounded, UnboundedReceiver, UnboundedSender};
-use hmac::{Hmac, Mac};
-use hyper::{Body, Method, Request, Uri, Client};
-use hyper::client::HttpConnector;
-use hyper::header::HeaderValue;
-use hyper_tls::{HttpsConnector, HttpsConnecting};
-use serde::Deserialize;
+use futures_util::{SinkExt, StreamExt, stream::SplitSink };
+use crypto::{hmac::Hmac, mac::Mac};
+use reqwest;
+use reqwest::{Request, Client};
 use serde_json;
-use url::Url;
+use tokio::net::TcpStream;
+use tokio_tungstenite::{connect_async, tungstenite::protocol::Message as TMessage, WebSocketStream};
 
 // LOCAL IMPORTS
-use crate::error::*;
 use crate::structs::*;
+use crate::errors::{CBProError, CBError};
+use std::sync::Arc;
 
 const USER_AGENT: &str = concat!("coinbase-pro-one-rs/", env!("CARGO_PKG_VERSION"));
 
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(untagged)]
-pub enum Channel {
-    Name(ChannelType),
-    WithProduct {
-        name: ChannelType,
-        product_ids: Vec<String>,
-    },
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub enum ChannelType {
-    Heartbeat,
-    Ticker,
-    Level2,
-    Matches,
-    Full,
-    User,
-}
-
-
+#[derive(Clone)]
 struct Credentials {
     key: String,
     secret: String,
@@ -57,10 +30,13 @@ struct Credentials {
 pub struct Conduit {
     base_http_uri: &'static str,
     base_ws_uri: &'static str,
-    client: Client<HttpsConnector<HttpConnector>>,
     credentials: Option<Credentials>,
+    client: reqwest::Client,
     receiver: UnboundedReceiver<Message>,
-    sender: UnboundedSender<Message>
+    sender: UnboundedSender<Message>,
+    receiver_priv: UnboundedReceiver<Message>,
+    sender_priv: UnboundedSender<Message>,
+    websocket_out: Option<SplitSink<WebSocketStream<TcpStream>, tokio_tungstenite::tungstenite::protocol::Message>>
 }
 
 impl Conduit {
@@ -70,24 +46,22 @@ impl Conduit {
             .expect("leap-second")
             .as_secs()
     }
-    pub fn sign(&self, ts: u64, method: Method, uri: &str, body: &str, ) -> Option<String> {
+    pub fn sign(&self, ts: u64, method: reqwest::Method, uri: &str, body: &str, ) -> Option<String> {
         if self.credentials.is_none() {
             return None
         } else {
-            let key = base64::decode(self.credentials.unwrap().secret.as_str())
+            let key = base64::decode(self.credentials.clone().unwrap().secret.as_str())
                                   .expect("base64::decode secret");
-            let mut mac: Hmac<sha2::Sha256> = Hmac::new_varkey(&self.credentials.unwrap().key.as_bytes())
-                                                .expect("Hmac::new(key)");
+            let mut mac = Hmac::new(crypto::sha2::Sha256::new(), &key);
             mac.input((ts.to_string() + method.as_str() + uri + body).as_bytes());
             Some(base64::encode(&mac.result().code()))
         }
    }
 
-    /// Creates a new Conduit (with client)
-    pub fn new(http_uri: &str, ws_uri: &str, product_ids: &[&str], channels: &[ChannelType],
+    /// Creates a new Conduit
+    pub fn new(http_uri: &'static str, ws_uri: &'static str,
                key: Option<String>, secret: Option<String>, passphrase: Option<String>)
                     -> Self {
-        let url = Url::parse(http_uri).unwrap();
         debug!("Auth params: key={:?} secret={:?} passphrase={:?}", key, secret, passphrase);
         let credentials = if key != None && secret != None && passphrase != None {
             Some(Credentials {
@@ -99,36 +73,35 @@ impl Conduit {
             None
         };
 
-        let https = HttpsConnector::new(4).unwrap();
-        let client = Client::builder()
-            .keep_alive(true)
-            .build::<_, Body>(https);
-        let (sender, receiver) = unbounded();
-
+        let (sender_priv, receiver) = unbounded();
+        let (sender, receiver_priv) = unbounded();
         Self {
             base_http_uri: http_uri,
             base_ws_uri: ws_uri,
-            client,
+            client: reqwest::Client::new(),
             credentials,
             receiver,
-            sender
+            sender,
+            receiver_priv,
+            sender_priv,
+            websocket_out: None
         }
     }
 
     /// Subscribe a Conduit to the Coinbase WS endpoint.
-    pub fn subscribe(&mut self, product_ids: &[&str], channels: &[ChannelType]) {
+    pub async fn subscribe(&mut self, product_ids: &[&str], channels: &[ChannelType]) {
         let timestamp = self.timestamp();
         let auth =
                 if self.credentials.is_some() {
                     debug!("Calculating auth...");
 
-                    let signature = self.sign(timestamp, Method::GET, "/users/self/verify", "");
-                    let creds = self.credentials.unwrap();
+                    let signature = self.sign(timestamp, reqwest::Method::GET, "/users/self/verify", "");
+                    let creds = self.credentials.as_ref().unwrap();
                     Some(
                         Auth {
                             signature: signature.unwrap(),
                             key: creds.key.to_string(),
-                            passphrase: creds.passphrase.unwrap().to_string(),
+                            passphrase: creds.passphrase.to_string(),
                             timestamp: timestamp.to_string()
                         }
                     )
@@ -144,27 +117,29 @@ impl Conduit {
                 .into_iter()
                 .map(|x| Channel::Name(x))
                 .collect::<Vec<_>>(),
-            auth: auth.clone(),
+            auth
         };
 
-        connect_async(self.base_ws_uri)
-            .map_err(Error::Connect)
-            .and_then(move |(ws_stream, _)| {
-                debug!("WebSocket handshake has been successfully completed");
-                let (sink, stream) = ws_stream.split();
-                let subsribe = serde_json::to_string(&_subscribe).unwrap();
+        // Unwrap the following.  We'll fail but we're broken anyways...
+        let (ws, _) = connect_async(self.base_ws_uri)
+            .await
+            .expect("tungstenite: Failed to connect...");
+        debug!("WebSocket handshake has been successfully completed");
+        let (mut ws_out, ws_in) = ws.split();
+        let subscribe = serde_json::to_string(&_subscribe).unwrap();
 
-                sink.send(Message::Text(subsribe))
-                    .map_err(Error::Send)
-                    .and_then(|_| {
-                        debug!("Subscription sent");
-                        let stream = stream
-                            .filter(|msg| msg.is_text())
-                            .map_err(Error::Read)
-                            .map(|msg| self.sender.send(self.convert_ws_msg(msg)));
-                        Ok(stream)
-                    })
-            }).flatten_stream();
+        ws_out.send(TMessage::Text(subscribe));
+        debug!("Subscription sent");
+        self.websocket_out = Some(ws_out);
+        ws_in.map(|r| {
+            let msg = if r.is_err() {
+                Message::InternalError(CBProError::Coinbase(CBError{ message: r.err().unwrap().to_string()}))
+            } else {
+                convert_ws(r.unwrap())
+
+            };
+            self.sender_priv.unbounded_send(msg)
+        });
     }
 
     /// **Core Requests**
@@ -172,59 +147,40 @@ impl Conduit {
     ///
     ///
 
-    fn request(&self, method: Method, _uri: &str, body: Option<String>) {
-        let timestamp = self.timestamp();
-        let uri: Uri = (self._pub.uri.to_string() + _uri).parse().unwrap();
-
-        let req;
-        let mut builder = Request::builder();
-        builder.method(&method);
-        builder.uri(uri);
-
-
-        builder.header("User-Agent", USER_AGENT);
-        builder.header("Content-Type", "Application/JSON");
-        //        builder.header("Accept", "*/*");
-        if (body.is_some()) {
+    async fn _request(&self, method: reqwest::Method, url: &str, body: Option<String>) {
+        let mut req = Client::new().request(method.clone(), url)
+            .header("User-Agent", USER_AGENT)
+            .header("Content-Type", "Application/JSON");
+        if body.is_some() {
             let _body = body.unwrap();
             let timestamp = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .expect("leap-second")
                 .as_secs();
-            let sign = self.sign(timestamp, method, _uri, &_body);
-            builder.header("CB-ACCESS-KEY", HeaderValue::from_str(&self.credentials.unwrap().key).unwrap());
-            builder.header("CB-ACCESS-SIGN", HeaderValue::from_str(&sign.unwrap()));
-            builder.header(
-                "CB-ACCESS-PASSPHRASE",
-                HeaderValue::from_str(&self.credentials.unwrap().passphrase).unwrap()
-            );
+            let sign = self.sign(timestamp, method, url, &_body);
+            let creds = self.credentials.as_ref().unwrap();
+            req = req.header("CB-ACCESS-KEY", &creds.key)
+                .header("CB-ACCESS-SIGN", sign.unwrap())
+                .header("CB-ACCESS-PASSPHRASE", &creds.passphrase)
+                .header("CB-ACCESS-TIMESTAMP", &timestamp.to_string());
+            req = req.body(_body);
         }
-        builder.header(
-            "CB-ACCESS-TIMESTAMP",
-            HeaderValue::from_str(&timestamp.to_string()).unwrap(),
-        );
-        builder.header(
-            "CB-ACCESS-PASSPHRASE",
-            HeaderValue::from_str(&self.passphrase).unwrap(),
-        );
-        if body.is_some() {
-            req = builder.body(body.into()).unwrap();
-        } else {
-            req = builder.body(Body::empty()).unwrap();
-        }
-        self.client.request(req)
-            .map_err(Error::Http)
-            .and_then(move |&resp| {
-               self.sender.unbounded_send(convert_http_msg(resp.body()))
-            });
+        self._handle_http_request(req.build().unwrap()).await;
     }
 
-    fn _get(&self, uri: &str) {
-        self._call(Method::GET, uri, None);
+    async fn _handle_http_request(&self, req: Request) {
+        let resp = self.client.execute(req).await;
+        let msg = if resp.is_err() {
+            Message::InternalError(CBProError::Http(resp.err().unwrap().to_string()))
+        } else {
+            convert_http(resp.unwrap()).await
+        };
+        self.sender_priv.unbounded_send(msg).unwrap();
     }
-    fn _post(&self, uri: &str, body: Option<&str>) {
-        let bd = str_or_blank(body);
-        self._call(Method::POST, uri, bd);
+
+    async fn _get(&self, uri: &str) { self._request(reqwest::Method::GET, uri, None).await; }
+    async fn _post(&self, uri: &str, body: Option<String>) {
+        self._request(reqwest::Method::POST, uri, body).await;
     }
 
 
@@ -232,13 +188,11 @@ impl Conduit {
     ///
     ///
     ///
-    pub fn time(&self) {
-        self._get("/time");
+    pub async fn products(&self) { self._get("/products").await; }
+    pub async fn time(&self) {
+        self._get("/time").await;
     }
 
-    pub fn products(&self) {
-        self._get("/products");
-    }
 
     /*
         pub fn book(&self, product_id: &str, level: u8) {
@@ -253,7 +207,7 @@ impl Conduit {
         /// # API Key Permissions
         /// This endpoint requires either the “view” or “trade” permission.
         pub fn get_accounts(&self) -> () {
-            self.call_get("/accounts")
+            self.call_get("/ accounts")
         }
 
         /// **Get Account History**
@@ -686,7 +640,7 @@ impl Conduit {
                     let res = serde_json::from_slice(&body).map_err(|e| {
                         serde_json::from_slice(&body)
                             .map(CBError::Coinbase)
-                            .unwrap_or_else(|_| {
+                            .unwrap_or_elgg/se(|_| {
                                 let data = String::from_utf8(body.to_vec()).unwrap();
                                 CBError::Serde { error: e, data }
                             })
@@ -788,27 +742,19 @@ impl Conduit {
     */
 }
 
-fn convert_http_msg(msg: Body) -> Message {
-    match msg {
-        Message::Text(str) => serde_json::from_str(&str).unwrap_or_else(|e| {
-            Message::InternalError(Error::Serde {
-                error: e,
-                data: str,
-            })
-        }),
-        _ => unreachable!(), // filtered in stream
-    }
+async fn convert_http(resp: reqwest::Response) -> Message {
+    let txt = resp.text().await.unwrap();
+    serde_json::from_str(txt.as_str()).unwrap_or_else(|e| {
+        Message::InternalError(CBProError::Serde(e, txt))
+    })
 }
 
-fn convert_ws_msg(msg: TMessage) -> Message {
-    match msg {
-        TMessage::Text(str) => serde_json::from_str(&str).unwrap_or_else(|e| {
-            Message::InternalError(Error::Serde {
-                error: e,
-                data: str,
-            })
+fn convert_ws(t_msg: TMessage) -> Message {
+    match t_msg {
+        TMessage::Text(msg) => serde_json::from_str(&msg).unwrap_or_else(|e| {
+            Message::InternalError(CBProError::Serde(e, msg.into()))
         }),
-        _ => unreachable!(), // filtered in stream
+        _ => unreachable!()
     }
 }
 
