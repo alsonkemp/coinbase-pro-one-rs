@@ -1,7 +1,9 @@
 
+extern crate async_std;
+extern crate async_tungstenite;
 extern crate chrono;
 extern crate crypto;
-extern crate futures_channel;
+extern crate futures;
 extern crate futures_util;
 #[macro_use]
 extern crate log;

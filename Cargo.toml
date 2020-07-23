@@ -13,22 +13,22 @@ homepage = "https://github.com/alsonkemp/coinbase-pro-one-rs"
 publish = false
 
 [dependencies]
-base64 = ""
-chrono = { version = "", features = [ "serde" ] }
-rust-crypto = ""
-futures = ""
-futures-channel = ""
-futures-util = { version = "0.3", features = ["async-await", "sink", "std"] }
-log = ""
-pretty_env_logger = ""
+async-tungstenite = {version = "*", features = ["async-std-runtime"] }
+async-std = { version = "*", features = [ "std", "unstable" ] }
+base64 = "*"
+chrono = { version = "*", features = [ "serde" ] }
+futures = "*"
+futures-util = "*"
+log = "*"
+pretty_env_logger = "*"
 reqwest = { version = "^0.10"}
-serde = ""
-serde_json = ""
-serde_derive = ""
-sha2 = ""
-time = ""
-tokio = { version = "0.2.21", features = ["io-std", "macros", "stream", "time"] }
+rust-crypto = "*"
+serde = "*"
+serde_json = "*"
+serde_derive = "*"
+sha2 = "*"
+time = "*"
 tokio-tungstenite = { version = "*", features = [ "stream" ] }
-url = ""
-uuid = { version = "", features = [ "serde", "v4" ] }
+url = "*"
+uuid = { version = "*", features = [ "serde", "v4" ] }
 

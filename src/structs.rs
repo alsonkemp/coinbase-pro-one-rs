@@ -254,7 +254,7 @@ pub struct Change {
     #[serde(deserialize_with = "uuid_opt_from_string")]
     pub profile_id: Option<Uuid>,
 }
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 #[serde(untagged)]
 pub enum Channel {
     Name(ChannelType),
@@ -867,7 +867,6 @@ pub enum StopType {
 pub struct Subscribe {
     #[serde(rename = "type")]
     pub _type: SubscribeCmd,
-    pub product_ids: Vec<String>,
     pub channels: Vec<Channel>,
     #[serde(flatten)]
     pub auth: Option<Auth>,

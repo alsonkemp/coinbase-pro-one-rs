@@ -91,10 +91,3 @@ where
     d.deserialize_any(UsizeInQuotes)
 }
 
-pub fn datetime_from_string<'de, D>(d: D) -> Result<super::structs::DateTime, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let s = String::deserialize(d)?;
-    (s + "").parse().map_err(de::Error::custom)
-}

@@ -4,49 +4,79 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
 // CRATE IMPORTS
-use futures_channel::mpsc::{unbounded, UnboundedReceiver, UnboundedSender};
-use futures_util::{SinkExt, StreamExt, stream::SplitSink };
+use async_std::net::TcpStream;
+use async_std::sync::MutexGuard;
+use async_std::pin::Pin;
+use async_std::sync::Mutex;
+use async_tungstenite::{async_std::connect_async, WebSocketStream,
+                        tungstenite::{protocol::Message as TMessage,
+                                      error::Error as TError } };
+use futures::{stream::{SplitSink}, SinkExt, StreamExt};
+use futures::channel::mpsc::{UnboundedSender, UnboundedReceiver, unbounded};
+
 use crypto::{hmac::Hmac, mac::Mac};
 use reqwest;
 use reqwest::{Request, Client};
 use serde_json;
-use tokio::net::TcpStream;
-use tokio_tungstenite::{connect_async, tungstenite::protocol::Message as TMessage, WebSocketStream};
 
 // LOCAL IMPORTS
 use crate::structs::*;
-use crate::errors::{CBProError, CBError};
-use std::sync::Arc;
+use crate::errors::{CBProError};
+use std::ops::Deref;
 
 const USER_AGENT: &str = concat!("coinbase-pro-one-rs/", env!("CARGO_PKG_VERSION"));
 
-#[derive(Clone)]
-struct Credentials {
+pub type FnReceiveFn = dyn Fn(Message);
+#[derive(Clone, Debug)]
+pub struct Credentials {
     key: String,
     secret: String,
     passphrase: String
 }
-
-pub struct Conduit {
-    base_http_uri: &'static str,
-    base_ws_uri: &'static str,
+pub struct Conduit<'a> {
+    base_http_uri: &'a str,
     credentials: Option<Credentials>,
     client: reqwest::Client,
-    receiver: UnboundedReceiver<Message>,
-    sender: UnboundedSender<Message>,
-    receiver_priv: UnboundedReceiver<Message>,
-    sender_priv: UnboundedSender<Message>,
-    websocket_out: Option<SplitSink<WebSocketStream<TcpStream>, tokio_tungstenite::tungstenite::protocol::Message>>
+    // Private endpoints
+    pub sender:     UnboundedSender<Message>,
+    pub receiver:   Mutex<&'a mut UnboundedReceiver<Message>>,
+    websocket: Mutex<SplitSink<WebSocketStream<TcpStream>, TMessage>>
 }
 
-impl Conduit {
-    pub fn timestamp(&self) -> u64 {
+impl <'a> Conduit<'a> {
+    pub fn _auth(&self) -> Option<Auth> {
+        let ts = self._timestamp();
+        if self.credentials.is_some() {
+            debug!("Calculating auth...");
+
+            let signature = self.sign(
+                                            ts,
+                                            reqwest::Method::GET,
+                                            "/users/self/verify",
+                                            "");
+            let creds = self.credentials.clone().unwrap();
+            Some(
+                Auth {
+                    signature: signature.unwrap(),
+                    key: creds.key.to_string(),
+                    passphrase: creds.passphrase.to_string(),
+                    timestamp: ts.to_string()
+                }
+            )
+        } else {
+            debug!("**Not** calculating auth... ");
+            None
+        }
+    }
+
+    pub fn _timestamp(&self) -> u64 {
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("leap-second")
             .as_secs()
     }
-    pub fn sign(&self, ts: u64, method: reqwest::Method, uri: &str, body: &str, ) -> Option<String> {
+
+    pub fn sign(&self, ts: u64, method: reqwest::Method, uri: &str, body: &str) -> Option<String> {
         if self.credentials.is_none() {
             return None
         } else {
@@ -59,96 +89,71 @@ impl Conduit {
    }
 
     /// Creates a new Conduit
-    pub fn new(http_uri: &'static str, ws_uri: &'static str,
-               key: Option<String>, secret: Option<String>, passphrase: Option<String>)
-                    -> Self {
-        debug!("Auth params: key={:?} secret={:?} passphrase={:?}", key, secret, passphrase);
-        let credentials = if key != None && secret != None && passphrase != None {
+    pub async fn new(http_uri: &'static str, ws_uri: &'static str, _creds: Option<Credentials>) -> Conduit<'a>{
+        debug!("Auth params: _creds={:?}", _creds);
+        let credentials = if _creds.is_some() {
+            let creds = _creds.unwrap();
             Some(Credentials {
-                key: key.unwrap(),
-                secret: secret.unwrap(),
-                passphrase: passphrase.unwrap()
+                key: creds.key,
+                secret: creds.secret,
+                passphrase: creds.passphrase
             })
         } else {
             None
         };
 
-        let (sender_priv, receiver) = unbounded();
-        let (sender, receiver_priv) = unbounded();
-        Self {
-            base_http_uri: http_uri,
-            base_ws_uri: ws_uri,
-            client: reqwest::Client::new(),
-            credentials,
-            receiver,
-            sender,
-            receiver_priv,
-            sender_priv,
-            websocket_out: None
+        let (sender, mut _receiver) = unbounded::<Message>();
+        let recieiver= Mutex::new(&mut _receiver);
+        match connect_async(ws_uri).await {
+            Err(e) => panic!("tungstenite: Failed to connect...: {:?}", e),
+            Ok((ws, r)) => {
+                debug!("WebSocket handshake has been successfully completed: {:?}", r);
+
+                let (ws_out, ws_in) = ws.split();
+                ws_in.for_each(|r| async {
+                    _handle_ws_resp(sender, r).await
+                });
+                Conduit {
+                    base_http_uri: http_uri,
+                    client: reqwest::Client::new(),
+                    credentials: credentials.clone(),
+                    sender,
+                    receiver,
+                    websocket: Mutex::new(ws_out)
+                }
+            }
         }
     }
 
-    /// Subscribe a Conduit to the Coinbase WS endpoint.
-    pub async fn subscribe(&mut self, product_ids: &[&str], channels: &[ChannelType]) {
-        let timestamp = self.timestamp();
-        let auth =
-                if self.credentials.is_some() {
-                    debug!("Calculating auth...");
 
-                    let signature = self.sign(timestamp, reqwest::Method::GET, "/users/self/verify", "");
-                    let creds = self.credentials.as_ref().unwrap();
-                    Some(
-                        Auth {
-                            signature: signature.unwrap(),
-                            key: creds.key.to_string(),
-                            passphrase: creds.passphrase.to_string(),
-                            timestamp: timestamp.to_string()
-                        }
-                    )
-                } else {
-                    debug!("**Not** calculating auth... ");
-                    None
-                };
+
+    pub async fn heartbeat(& mut self) {
+        self.subscribe(&[Channel::Name(ChannelType::Heartbeat)]).await
+
+    }
+
+    /// Subscribe a Conduit to the Coinbase WS endpoint.
+    pub async fn subscribe(& mut self, channels: &[Channel]) {
         let _subscribe = Subscribe {
             _type: SubscribeCmd::Subscribe,
-            product_ids: product_ids.into_iter().map(|x| x.to_string()).collect(),
-            channels: channels
-                .to_vec()
-                .into_iter()
-                .map(|x| Channel::Name(x))
-                .collect::<Vec<_>>(),
-            auth
+            channels: channels.to_vec(),
+            auth: self._auth()
         };
 
-        // Unwrap the following.  We'll fail but we're broken anyways...
-        let (ws, _) = connect_async(self.base_ws_uri)
-            .await
-            .expect("tungstenite: Failed to connect...");
-        debug!("WebSocket handshake has been successfully completed");
-        let (mut ws_out, ws_in) = ws.split();
         let subscribe = serde_json::to_string(&_subscribe).unwrap();
-
-        ws_out.send(TMessage::Text(subscribe));
+        self.websocket.lock().await.send(TMessage::Text(subscribe)).await.unwrap();
         debug!("Subscription sent");
-        self.websocket_out = Some(ws_out);
-        ws_in.map(|r| {
-            let msg = if r.is_err() {
-                Message::InternalError(CBProError::Coinbase(CBError{ message: r.err().unwrap().to_string()}))
-            } else {
-                convert_ws(r.unwrap())
+   }
 
-            };
-            self.sender_priv.unbounded_send(msg)
-        });
-    }
 
     /// **Core Requests**
     ///
     ///
     ///
 
-    async fn _request(&self, method: reqwest::Method, url: &str, body: Option<String>) {
-        let mut req = Client::new().request(method.clone(), url)
+    async fn _request(&self, method: reqwest::Method, path: &str, body: Option<String>) {
+        let mut req = Client::new()
+            .request(method.clone(), &format!("{}{}", self.base_http_uri, path))
             .header("User-Agent", USER_AGENT)
             .header("Content-Type", "Application/JSON");
         if body.is_some() {
@@ -157,7 +162,7 @@ impl Conduit {
                 .duration_since(UNIX_EPOCH)
                 .expect("leap-second")
                 .as_secs();
-            let sign = self.sign(timestamp, method, url, &_body);
+            let sign = self.sign(timestamp, method, path, &_body);
             let creds = self.credentials.as_ref().unwrap();
             req = req.header("CB-ACCESS-KEY", &creds.key)
                 .header("CB-ACCESS-SIGN", sign.unwrap())
@@ -175,7 +180,10 @@ impl Conduit {
         } else {
             convert_http(resp.unwrap()).await
         };
-        self.sender_priv.unbounded_send(msg).unwrap();
+        match self.sender.unbounded_send(msg) {
+            Ok(_) => {},
+            Err(e) => {println!("Conduit._request error: {:?}", e);}
+        };
     }
 
     async fn _get(&self, uri: &str) { self._request(reqwest::Method::GET, uri, None).await; }
@@ -742,6 +750,23 @@ impl Conduit {
     */
 }
 
+
+async fn _handle_ws_resp(sender: UnboundedSender<Message>, r: Result<TMessage, TError>) {
+    let msg = match r {
+        Ok(tmsg) => Some(convert_ws(tmsg)),
+        Err(e) => {
+            debug!("_handle_ws_resp._handle_ws_msg: {_e}", _e= e);
+            None
+        }
+    };
+    if msg.is_some() {
+        match sender.lock().unbounded_send(msg.unwrap()) {
+            Ok(_) => {},
+            Err(e) => debug!("_handle_ws_resp: {_e}", _e = e),
+        };
+    }
+}
+
 async fn convert_http(resp: reqwest::Response) -> Message {
     let txt = resp.text().await.unwrap();
     serde_json::from_str(txt.as_str()).unwrap_or_else(|e| {
@@ -758,9 +783,3 @@ fn convert_ws(t_msg: TMessage) -> Message {
     }
 }
 
-fn str_or_blank(v: Option<&str>) -> &str {
-    match v {
-        Some(s) => s,
-        None => ""
-    }
-}
