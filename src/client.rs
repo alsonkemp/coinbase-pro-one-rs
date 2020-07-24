@@ -5,9 +5,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 // CRATE IMPORTS
 use async_std::net::TcpStream;
-use async_std::sync::MutexGuard;
-use async_std::pin::Pin;
-use async_std::sync::Mutex;
+use async_std::sync::{Mutex, Arc};
 use async_tungstenite::{async_std::connect_async, WebSocketStream,
                         tungstenite::{protocol::Message as TMessage,
                                       error::Error as TError } };
@@ -22,7 +20,6 @@ use serde_json;
 // LOCAL IMPORTS
 use crate::structs::*;
 use crate::errors::{CBProError};
-use std::ops::Deref;
 
 const USER_AGENT: &str = concat!("coinbase-pro-one-rs/", env!("CARGO_PKG_VERSION"));
 
@@ -34,17 +31,57 @@ pub struct Credentials {
     passphrase: String
 }
 pub struct Conduit<'a> {
+    // The Coinbase REST endpoint.  Needed for all RESTy methods.
     base_http_uri: &'a str,
+    // Coinbase credentials.
     credentials: Option<Credentials>,
-    client: reqwest::Client,
-    // Private endpoints
-    pub sender:     UnboundedSender<Message>,
-    pub receiver:   Mutex<&'a mut UnboundedReceiver<Message>>,
+    // To communicate with the 'user' of the library
+    pub sender:    Mutex<UnboundedSender<Message>>,
+    pub receiver:  Mutex<UnboundedReceiver<Message>>,
+    // To send messages to Coinbase
     websocket: Mutex<SplitSink<WebSocketStream<TcpStream>, TMessage>>
 }
 
-impl <'a> Conduit<'a> {
-    pub fn _auth(&self) -> Option<Auth> {
+impl <'a> Arc<Mutex<Conduit<'a>>> {
+    /// Creates a new Conduit
+    pub async fn new(http_uri: &'static str, ws_uri: &'static str, _creds: Option<Credentials>) ->
+                         Arc<Mutex<Conduit<'a>>> {
+        debug!("Auth params: _creds={:?}", _creds);
+        let credentials = if _creds.is_some() {
+            let creds = _creds.unwrap();
+            Some(Credentials {
+                key: creds.key,
+                secret: creds.secret,
+                passphrase: creds.passphrase
+            })
+        } else {
+            None
+        };
+
+        let (mut _sender, _receiver) = unbounded::<Message>();
+        let sender = Mutex::new(_sender);
+        let receiver = Mutex::new(_receiver);
+        match connect_async(ws_uri).await {
+            Err(e) => panic!("tungstenite: Failed to connect...: {:?}", e),
+            Ok((ws, r)) => {
+                debug!("WebSocket handshake has been successfully completed: {:?}", r);
+
+                let (ws_out, ws_in) = ws.split();
+                ws_in.for_each(|r| async {
+                    _handle_ws_resp(&sender, r).await
+                }).await;
+                Arc::new(Mutex::new(Conduit {
+                    base_http_uri: http_uri,
+                    credentials: credentials.clone(),
+                    sender,
+                    receiver,
+                    websocket: Mutex::new(ws_out)
+                }))
+            }
+        }
+    }
+
+    pub fn _auth(self) -> Option<Auth> {
         let ts = self._timestamp();
         if self.credentials.is_some() {
             debug!("Calculating auth...");
@@ -87,44 +124,6 @@ impl <'a> Conduit<'a> {
             Some(base64::encode(&mac.result().code()))
         }
    }
-
-    /// Creates a new Conduit
-    pub async fn new(http_uri: &'static str, ws_uri: &'static str, _creds: Option<Credentials>) -> Conduit<'a>{
-        debug!("Auth params: _creds={:?}", _creds);
-        let credentials = if _creds.is_some() {
-            let creds = _creds.unwrap();
-            Some(Credentials {
-                key: creds.key,
-                secret: creds.secret,
-                passphrase: creds.passphrase
-            })
-        } else {
-            None
-        };
-
-        let (sender, mut _receiver) = unbounded::<Message>();
-        let recieiver= Mutex::new(&mut _receiver);
-        match connect_async(ws_uri).await {
-            Err(e) => panic!("tungstenite: Failed to connect...: {:?}", e),
-            Ok((ws, r)) => {
-                debug!("WebSocket handshake has been successfully completed: {:?}", r);
-
-                let (ws_out, ws_in) = ws.split();
-                ws_in.for_each(|r| async {
-                    _handle_ws_resp(sender, r).await
-                });
-                Conduit {
-                    base_http_uri: http_uri,
-                    client: reqwest::Client::new(),
-                    credentials: credentials.clone(),
-                    sender,
-                    receiver,
-                    websocket: Mutex::new(ws_out)
-                }
-            }
-        }
-    }
-
 
 
     pub async fn heartbeat(& mut self) {
@@ -174,13 +173,13 @@ impl <'a> Conduit<'a> {
     }
 
     async fn _handle_http_request(&self, req: Request) {
-        let resp = self.client.execute(req).await;
+        let resp = Client::new().execute(req).await;
         let msg = if resp.is_err() {
             Message::InternalError(CBProError::Http(resp.err().unwrap().to_string()))
         } else {
             convert_http(resp.unwrap()).await
         };
-        match self.sender.unbounded_send(msg) {
+        match self.sender.lock().await.unbounded_send(msg) {
             Ok(_) => {},
             Err(e) => {println!("Conduit._request error: {:?}", e);}
         };
@@ -751,7 +750,7 @@ impl <'a> Conduit<'a> {
 }
 
 
-async fn _handle_ws_resp(sender: UnboundedSender<Message>, r: Result<TMessage, TError>) {
+async fn _handle_ws_resp(sender: &Mutex<UnboundedSender<Message>>, r: Result<TMessage, TError>) {
     let msg = match r {
         Ok(tmsg) => Some(convert_ws(tmsg)),
         Err(e) => {
@@ -760,7 +759,7 @@ async fn _handle_ws_resp(sender: UnboundedSender<Message>, r: Result<TMessage, T
         }
     };
     if msg.is_some() {
-        match sender.lock().unbounded_send(msg.unwrap()) {
+        match sender.lock().await.unbounded_send(msg.unwrap()) {
             Ok(_) => {},
             Err(e) => debug!("_handle_ws_resp: {_e}", _e = e),
         };
