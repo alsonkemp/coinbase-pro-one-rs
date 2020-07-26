@@ -2,7 +2,7 @@ use std::error::Error;
 use std::fmt;
 
 use serde_json;
-use tokio_tungstenite::{tungstenite};
+use async_tungstenite::{tungstenite};
 
 #[derive(Debug)]
 pub enum CBProError {

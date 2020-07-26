@@ -1,5 +1,6 @@
 
 extern crate async_std;
+extern crate async_tls;
 extern crate async_tungstenite;
 extern crate chrono;
 extern crate crypto;
@@ -8,10 +9,10 @@ extern crate futures_util;
 #[macro_use]
 extern crate log;
 extern crate pretty_env_logger;
+extern crate reqwest;
 extern crate serde;
 extern crate serde_json;
 extern crate time;
-extern crate tokio_tungstenite;
 extern crate uuid;
 extern crate url;
 

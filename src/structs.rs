@@ -498,6 +498,7 @@ pub enum Message {
         asks: Vec<Level2SnapshotRecord>,
     },
     Ticker(Ticker),
+    Time(Time)
 }
 
 /*
