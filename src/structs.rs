@@ -489,6 +489,7 @@ pub enum Message {
     Match(Match),
     Open(Open),
     Received(Received),
+    Subscribe(Subscribe),
     Subscriptions {
         channels: Vec<Channel>,
     },
@@ -515,6 +516,7 @@ impl From<InputMessage> for Message {
         match msg {
             InputMessage::Subscriptions { channels } => Message::Subscriptions { channels },
             InputMessage::Heartbeat {
+                :w
                 sequence,
                 last_trade_id,
                 product_id,
