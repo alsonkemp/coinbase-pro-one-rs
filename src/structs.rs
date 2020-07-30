@@ -867,9 +867,8 @@ pub enum StopType {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Subscribe {
-    #[serde(rename = "type")]
-    pub _type: SubscribeCmd,
     pub channels: Vec<Channel>,
     #[serde(flatten)]
     pub auth: Option<Auth>,
