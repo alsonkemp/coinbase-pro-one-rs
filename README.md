@@ -28,6 +28,8 @@ coinbase-pro-one-rs = "0.0.1"
 
 See `/examples`.
 
+Run against the sandbox: `cargo run --example one`
+
 ## Coinbase Pro functionality supported:
 - [x] Async
 - [x] Websocket-Feed
