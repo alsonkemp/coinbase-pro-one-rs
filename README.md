@@ -30,40 +30,9 @@ See `/examples`.
 
 Run against the sandbox: `cargo run --example one`
 
-## Coinbase Pro functionality supported:
-- [x] Async
-- [x] Websocket-Feed
-
-## API
-- [x] Requests
-- [ ] Pagination
-- [x] Types
-- [x] Private
-  - [x] Authentication
-  - [x] Accounts
-  - [ ] Orders
-  - [ ] Fills
-  - [ ] Deposits
-  - [ ] Withdrawals
-  - [ ] Payment Methods
-  - [ ] Coinbase Accounts
-  - [ ] Reports
-  - [x] User Account
-- [x] Market Data
-  - [x] Products
-  - [x] Currencies
-  - [x] Time
-- [x] Websocket Feed
-  - [x] heartbeat
-  - [x] ticker
-  - [x] level2
-  - [x] user
-  - [x] matches
-  - [x] full
-
 # FIX API
-See https://github.com/inv2004/coinbase-pro-rs for FIX requests.
+See the original author @ https://github.com/inv2004/coinbase-pro-rs for FIX requests.
 
 # OrderBook
-See  https://github.com/inv2004/orderbook-rs (for `coinbase-pro-rs`) and/or `/examples` (for `coinbase-pro-one-rs`).
+See the original author's @  https://github.com/inv2004/orderbook-rs (for `coinbase-pro-rs`) and/or `/examples` (for `coinbase-pro-one-rs`).
 
