@@ -106,7 +106,6 @@ impl Conduit<'static> {
     /// Subscribe a Conduit to the Coinbase WS endpoint.
     pub async fn subscribe(& mut self, channels: &[Channel]) {
         let subscribe = Subscribe {
-            _type: "subscribe".to_string(),
             channels: channels.to_vec(),
             auth: _auth(self.credentials)
         };

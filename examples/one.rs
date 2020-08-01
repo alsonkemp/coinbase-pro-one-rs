@@ -15,12 +15,8 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>> {
         conduit.heartbeat().await;
         conduit.status().await;
         loop {
-            if receiver.is_empty() {
-                task::sleep(Duration::from_millis(10)).await;
-            } else {
-                let resp = receiver.next().await;
-                dbg!("One: next: {:?}", resp);
-            }
+            let resp = receiver.next().await;
+            dbg!("One: next: {:?}", resp);
         }
     });
     Ok(())

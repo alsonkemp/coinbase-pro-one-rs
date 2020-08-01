@@ -491,6 +491,7 @@ pub enum Message {
     None,
     Open(Open),
     Received(Received),
+    #[serde(rename = "subscribe")]
     Subscribe(Subscribe),
     Subscriptions {
         channels: Vec<Channel>,
@@ -869,10 +870,8 @@ pub enum StopType {
 }
 
 #[derive(Debug, Deserialize, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename = "subscribe")]
 pub struct Subscribe {
-    #[serde(rename = "type")]
-    pub _type: String,
     pub channels: Vec<Channel>,
     #[serde(flatten)]
     pub auth: Option<Auth>,
