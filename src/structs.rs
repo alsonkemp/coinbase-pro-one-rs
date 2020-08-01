@@ -26,7 +26,7 @@ use crate::errors;
 // Type aliases
 pub type DateTime = chrono::DateTime<chrono::Utc>;
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, PartialEq, Serialize)]
 pub struct Account {
     #[serde(deserialize_with = "f64_from_string")]
     pub available: f64,
@@ -39,7 +39,7 @@ pub struct Account {
     pub profile_id: Uuid,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, PartialEq, Serialize)]
 pub struct AccountHistory {
     #[serde(skip_deserializing)]
     pub _type: AccountHistoryType,
@@ -54,7 +54,7 @@ pub struct AccountHistory {
     pub id: usize,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, PartialEq, Serialize)]
 pub enum AccountHistoryType {
     Fee,
     Match,
@@ -69,7 +69,7 @@ impl Default for AccountHistoryType {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(tag = "type", content = "details")]
 // #[serde(rename_all = "camelCase")]
 pub enum AccountHistoryDetails {
@@ -97,7 +97,7 @@ pub enum AccountHistoryDetails {
     },
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 // #[serde(rename_all = "camelCase")]
 pub enum AccountHistoryDetailsTransferType {
     Deposit,
@@ -115,7 +115,7 @@ impl<'a> From<&'a AccountHistoryDetails> for AccountHistoryType {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, PartialEq, Serialize)]
 pub struct AccountHolds {
     #[serde(rename = "ref")]
     pub _ref: Uuid,
@@ -128,14 +128,14 @@ pub struct AccountHolds {
     pub updated_at: DateTime,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum AccountHoldsType {
     Order,
     Transfer,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, PartialEq, Serialize)]
 pub struct Activate {
     pub product_id: String,
     #[serde(deserialize_with = "f64_from_string")]
@@ -155,7 +155,7 @@ pub struct Activate {
     pub profile_id: Option<Uuid>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, PartialEq, Serialize)]
 pub struct Auth {
     pub signature: String,
     pub key: String,
@@ -163,7 +163,7 @@ pub struct Auth {
     pub timestamp: String,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, PartialEq, Serialize)]
 pub struct Book<T> {
     pub sequence: usize,
     pub bids: Vec<T>,
@@ -174,7 +174,7 @@ pub trait BookLevel {
     fn level() -> u8;
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, PartialEq, Serialize)]
 pub struct BookRecordL1 {
     #[serde(deserialize_with = "f64_from_string")]
     pub price: f64,
@@ -189,7 +189,7 @@ impl BookLevel for BookRecordL1 {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, PartialEq, Serialize)]
 pub struct BookRecordL2 {
     #[serde(deserialize_with = "f64_from_string")]
     pub price: f64,
@@ -204,7 +204,7 @@ impl BookLevel for BookRecordL2 {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, PartialEq, Serialize)]
 pub struct BookRecordL3 {
     #[serde(deserialize_with = "f64_from_string")]
     pub price: f64,
@@ -219,7 +219,7 @@ impl BookLevel for BookRecordL3 {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, PartialEq, Serialize)]
 pub struct Candle(
     pub usize, // time
     pub f64, // low
@@ -229,7 +229,7 @@ pub struct Candle(
     pub f64,   // volume
 );
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, PartialEq, Serialize)]
 pub struct Change {
     pub time: DateTime,
     pub sequence: usize,
@@ -254,7 +254,7 @@ pub struct Change {
     #[serde(deserialize_with = "uuid_opt_from_string")]
     pub profile_id: Option<Uuid>,
 }
-#[derive(Clone, Serialize, Deserialize, Debug)]
+#[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
 #[serde(untagged)]
 pub enum Channel {
     Name(ChannelType),
@@ -264,19 +264,20 @@ pub enum Channel {
     },
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 #[serde(rename_all = "camelCase")]
 pub enum ChannelType {
+    Full,
     Heartbeat,
-    Ticker,
     Level2,
     Matches,
-    Full,
+    Status,
+    Ticker,
     User
 }
 
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, PartialEq, Serialize)]
 pub struct Currency {
     pub id: String,
     pub name: String,
@@ -284,7 +285,7 @@ pub struct Currency {
     pub min_size: f64,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, PartialEq, Serialize)]
 #[serde(untagged)]
 pub enum Done {
     Limit {
@@ -313,7 +314,7 @@ pub enum Done {
     },
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, PartialEq, Serialize)]
 pub struct Fill {
     pub trade_id: usize,
     pub product_id: String,
@@ -330,14 +331,14 @@ pub struct Fill {
     pub side: OrderSide,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum FillLiquidity {
     M,
     T
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, PartialEq, Serialize)]
 pub enum Full {
     Received(Received),
     Open(Open),
@@ -398,7 +399,7 @@ pub enum Granularity {
 }
 
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, PartialEq, Serialize)]
 pub enum Level2 {
     Snapshot {
         product_id: String,
@@ -411,7 +412,7 @@ pub enum Level2 {
     },
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, PartialEq, Serialize)]
 pub struct Level2SnapshotRecord {
     #[serde(deserialize_with = "f64_from_string")]
     pub price: f64,
@@ -419,7 +420,7 @@ pub struct Level2SnapshotRecord {
     pub size: f64,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, PartialEq, Serialize)]
 pub struct Level2UpdateRecord {
     pub side: OrderSide,
     #[serde(deserialize_with = "f64_from_string")]
@@ -431,14 +432,14 @@ pub struct Level2UpdateRecord {
 
 
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, PartialEq, Serialize)]
 #[serde(untagged)]
 pub enum MarketType {
     Size { size: f64 },
     Funds { funds: f64 },
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, PartialEq, Serialize)]
 pub struct Match {
     pub sequence: usize,
     pub maker_order_id: Uuid,
@@ -463,7 +464,7 @@ pub struct Match {
 // market:{"id":"ea565dc3-1656-49d7-bcdb-d99981ce35a7","size":"0.00100000","product_id":"BTC-USD","side":"buy","stp":"dc","funds":"28.2449436100000000","type":"market","post_only":false,"created_at":"2018-08-23T18:43:18.964413Z","fill_fees":"0.0000000000000000","filled_size":"0.00000000","executed_value":"0.0000000000000000","status":"pending","settled":false}
 // call:[{"id":"063da13d-6aba-45e1-91ca-89f8514da989","price":"100000.00000000","size":"0.00100000","product_id":"BTC-USD","side":"sell","type":"limit","time_in_force":"GTC","post_only":true,"created_at":"2018-08-24T04:50:01.139098Z","fill_fees":"0.0000000000000000","filled_size":"0.00000000","executed_value":"0.0000000000000000","status":"open","settled":false}]
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, PartialEq, Serialize)]
 #[serde(tag = "type")]
 pub enum Message {
     Activate(Activate),
@@ -487,6 +488,7 @@ pub enum Message {
     InternalError(errors::CBProError),
     Level2(Level2),
     Match(Match),
+    None,
     Open(Open),
     Received(Received),
     Subscribe(Subscribe),
@@ -559,7 +561,7 @@ impl From<InputMessage> for Message {
 */
 
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, PartialEq, Serialize)]
 pub struct Open {
     pub order_id: Uuid,
     #[serde(deserialize_with = "f64_from_string")]
@@ -578,7 +580,7 @@ pub struct Open {
 }
 
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, PartialEq, Serialize)]
 pub struct Order<'a> {
     #[serde(flatten)]
     pub _type: OrderType,
@@ -704,14 +706,14 @@ impl<'a> Order<'a> {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum OrderSide {
     Buy,
     Sell,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum OrderStatus {
     Open,
@@ -734,21 +736,21 @@ impl fmt::Display for OrderStatus {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, PartialEq, Serialize)]
 pub struct OrderStop {
     stop_price: f64,
     #[serde(rename = "stop")]
     _type: OrderStopType,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum OrderStopType {
     Loss,
     Entry,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, PartialEq, Serialize)]
 #[serde(tag = "time_in_force")]
 pub enum OrderTimeInForce {
     GTC,
@@ -759,7 +761,7 @@ pub enum OrderTimeInForce {
     FOK,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum OrderTimeInForceCancelAfter {
     Min,
@@ -767,7 +769,7 @@ pub enum OrderTimeInForceCancelAfter {
     Day,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(tag = "type")]
 pub enum OrderType {
@@ -792,7 +794,7 @@ pub enum OrderType {
     },
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, PartialEq, Serialize)]
 pub struct Product {
     pub id: String,
     pub base_currency: String,
@@ -805,14 +807,14 @@ pub struct Product {
     pub quote_increment: f64,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Reason {
     Filled,
     Canceled,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, PartialEq, Serialize)]
 #[serde(tag = "order_type")]
 #[serde(rename_all = "camelCase")]
 pub enum Received {
@@ -847,7 +849,7 @@ pub enum Received {
     },
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, PartialEq, Serialize)]
 pub struct Stats24H {
     #[serde(deserialize_with = "f64_from_string")]
     pub open: f64,
@@ -859,28 +861,30 @@ pub struct Stats24H {
     pub volume: f64,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum StopType {
     Entry,
     Exit,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Subscribe {
+    #[serde(rename = "type")]
+    pub _type: String,
     pub channels: Vec<Channel>,
     #[serde(flatten)]
     pub auth: Option<Auth>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum SubscribeCmd {
     Subscribe,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, PartialEq, Serialize)]
 #[serde(untagged)]
 #[serde(rename_all = "camelCase")]
 pub enum Ticker {
@@ -944,13 +948,13 @@ impl Ticker {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, PartialEq, Serialize)]
 pub struct Time {
     pub iso: String,
     pub epoch: f64,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, PartialEq, Serialize)]
 pub struct TrailingVolume {
     pub product_id: String,
     #[serde(deserialize_with = "f64_from_string")]
@@ -961,7 +965,7 @@ pub struct TrailingVolume {
 }
 
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, PartialEq, Serialize)]
 pub struct Trade {
     pub time: DateTime,
     pub trade_id: usize,

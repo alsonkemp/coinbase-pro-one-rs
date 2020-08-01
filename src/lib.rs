@@ -1,3 +1,5 @@
+#![feature(box_syntax)]
+#![feature(format_args_capture)]
 
 extern crate async_std;
 extern crate async_tls;
@@ -6,7 +8,6 @@ extern crate chrono;
 extern crate crypto;
 extern crate futures;
 extern crate futures_util;
-#[macro_use]
 extern crate log;
 extern crate pretty_env_logger;
 extern crate reqwest;

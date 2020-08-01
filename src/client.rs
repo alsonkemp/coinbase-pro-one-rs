@@ -1,15 +1,14 @@
 #!feature(async_closure)]
 
 // STD IMPORTS
-use std::time::{SystemTime, UNIX_EPOCH, Duration};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 // CRATE IMPORTS
 use async_std::{task, sync::{channel, Receiver, Sender}};
 use async_tungstenite::{async_std::{ConnectStream, connect_async}, WebSocketStream,
-                        tungstenite::{protocol::Message as TMessage,
-                                      error::Error as TError } };
+                        tungstenite::{protocol::Message as TMessage}};
 use crypto::{hmac::Hmac, mac::Mac};
-use futures_util::{SinkExt, TryStreamExt};
+use futures_util::{stream::SplitSink, SinkExt, TryStreamExt, FutureExt, StreamExt};
 use reqwest::blocking::{Client};
 use serde_json;
 use serde_json::Value;
@@ -17,6 +16,9 @@ use serde_json::Value;
 // LOCAL IMPORTS
 use crate::structs::*;
 use crate::errors::{CBProError};
+use async_std::pin::Pin;
+use futures_util::stream::SplitStream;
+use std::borrow::BorrowMut;
 
 const CHANNEL_SIZE: usize = 128;
 const USER_AGENT: &str = concat!("coinbase-pro-one-rs/", env!("CARGO_PKG_VERSION"));
@@ -37,10 +39,10 @@ pub struct Conduit<'a> {
     // Coinbase credentials.
     credentials: Option<Credentials<'a>>,
     // To communicate with the 'user' of the library
-    sender:    Sender<Message>,
-    // Internal websocket communications
-    to_websocket:    Sender<Message>,
-    from_websocket:  Receiver<Message>,
+    sender:   Sender<Message>,
+
+    to_websocket: Sender<Message>,
+    from_websocket: Receiver<Message>
 }
 
 impl Conduit<'static> {
@@ -60,19 +62,20 @@ impl Conduit<'static> {
             None
         };
 
-        let (sender, receiver) = channel::<Message>(CHANNEL_SIZE);
-
         match connect_async(ws_uri).await {
             Err(e) => panic!("tungstenite: Failed to connect...: {:?}", e),
-            Ok((mut ws, r)) => {
-                dbg!("Conduit: WebSocket handshake has been successfully completed: {:?}", r);
+            Ok((ws, _)) => {
+                dbg!("Conduit: WebSocket handshake has been successfully completed...");
 
                 let (sender, receiver) = channel::<Message>(CHANNEL_SIZE);
-                let (_to, mut to) = channel::<Message>(CHANNEL_SIZE);
-                let (mut from, _from) = channel::<Message>(CHANNEL_SIZE);
+                let (_to, to) = channel::<Message>(CHANNEL_SIZE);
+                let (from, _from) = channel::<Message>(CHANNEL_SIZE);
+                dbg!("Conduit: _websocket_handler: spawning...");
                 task::spawn(async move {
-                    dbg!("Conduit: _websocket_handler: handling...");
-                    _websocket_handler(&mut ws, &mut from, &mut to).await;
+                    dbg!("Conduit: _websocket_handler: spawned...");
+                    _websocket_handler(Pin::new(Box::new(ws)),
+                                       Pin::new(Box::new(from)),
+                                       Pin::new(Box::new(to))).await;
                 });
                 (Conduit {
                     last_time: _timestamp(),
@@ -99,16 +102,11 @@ impl Conduit<'static> {
         }
     }
 
-    pub async fn heartbeat(& mut self) {
-        dbg!("Conduit: heartbeat...");
-        self.subscribe(&[Channel::WithProduct{
-            name: ChannelType::Heartbeat,
-            product_ids:vec!("BTC-USB".to_string())}]).await
-    }
 
     /// Subscribe a Conduit to the Coinbase WS endpoint.
     pub async fn subscribe(& mut self, channels: &[Channel]) {
         let subscribe = Subscribe {
+            _type: "subscribe".to_string(),
             channels: channels.to_vec(),
             auth: _auth(self.credentials)
         };
@@ -123,7 +121,7 @@ impl Conduit<'static> {
     ///
     ///
     async fn _request(& mut self, method: reqwest::Method, path: &str, body: Option<String>, _type: &str) {
-        dbg!("Conduit: _request: {:?} {:?} {:?}", &method, &path, &body);
+        dbg!("Conduit: _request:", &method, &path, &body);
         let mut req = Client::new()
             .request(method.clone(), &format!("{}{}", self.base_http_uri, path))
             .header("User-Agent", USER_AGENT)
@@ -164,9 +162,22 @@ impl Conduit<'static> {
     ///
     ///
     ///
+    pub async fn heartbeat(& mut self) {
+        dbg!("Conduit: heartbeat...");
+        self.subscribe(&[Channel::WithProduct{
+            name: ChannelType::Heartbeat,
+            product_ids:vec!("BTC-USD".to_string())}]).await
+    }
+
     pub async fn products(&mut self) {
         dbg!("Conduit: products sent...");
         self._get("Products", "/products").await;
+    }
+    pub async fn status(& mut self) {
+        dbg!("Conduit: status...");
+        self.subscribe(&[Channel::Name(
+            ChannelType::Status
+        )]).await;
     }
     pub async fn time(&mut self) {
         dbg!("Conduit: time sent...");
@@ -721,37 +732,15 @@ impl Conduit<'static> {
     */
 }
 
-
-async fn _handle_ws_resp(sender: &Sender<Message>, r: Result<TMessage, TError>) {
-    let msg = match r {
-        Ok(tmsg) => Some(convert_ws(tmsg)),
-        Err(e) => {
-            dbg!("_handle_ws_resp._handle_ws_msg error: {_e}", e);
-            None
-        }
-    };
-    if msg.is_some() {
-        sender.send(msg.unwrap()).await;
-    }
-}
-
 async fn convert_http(resp: reqwest::blocking::Response, _type: &str) -> Message {
     let txt = resp.text().unwrap();
     let mut v: Value = serde_json::from_str(txt.as_str()).unwrap();
     v["type"] = serde_json::Value::String(_type.to_string());
     serde_json::from_value(v).unwrap_or_else(|e| {
-        Message::InternalError(CBProError::Serde(e, txt))
+        Message::InternalError(CBProError::Serde(e.to_string()))
     })
 }
 
-fn convert_ws(t_msg: TMessage) -> Message {
-    match t_msg {
-        TMessage::Text(msg) => serde_json::from_str(&msg).unwrap_or_else(|e| {
-            Message::InternalError(CBProError::Serde(e, msg.into()))
-        }),
-        _ => unreachable!()
-    }
-}
 
 pub fn _timestamp() -> u64 {
     SystemTime::now()
@@ -798,20 +787,47 @@ pub fn _auth(credentials: Option<Credentials<'static>>) -> Option<Auth> {
         }
     }
 }
-pub async fn _websocket_handler(ws:   &mut WebSocketStream<ConnectStream>,
-                                from: &mut Sender<Message>,
-                                to:   &mut Receiver<Message>) {
+
+pub async fn _websocket_handler(    ws:   Pin<Box<WebSocketStream<ConnectStream>>>,
+                                mut from: Pin<Box<Sender<Message>>>,
+                                mut to:   Pin<Box<Receiver<Message>>>) {
+
+    async fn handle_outgoing(
+            _ws_write: &mut SplitSink<Pin<Box<WebSocketStream<ConnectStream>>>, TMessage>,
+            _to:       &mut  Pin<Box<Receiver<Message>>>) {
+        let msg = serde_json::to_string(&_to.recv().await.unwrap()).unwrap();
+        dbg!("Conduit. _websocket_handler._handle_outgoing sending{:?}", &msg);
+        _ws_write.send(TMessage::Text(msg)).await.unwrap();
+
+    };
+
+    async fn handle_incoming(
+          mut _ws_read: &mut SplitStream<Pin<Box<WebSocketStream<ConnectStream>>>>,
+              _from:    &mut Pin<Box<Sender<Message>>>) {
+        let tmsg = _ws_read.try_next().await;
+        dbg!("Conduit. _websocket_handler._handle_incoming: received {:?}", &tmsg);
+        let cmsg = match tmsg {
+            Ok(Some(TMessage::Text(msg))) =>
+                serde_json::from_str(&msg).unwrap_or_else(|e| {
+                    Message::InternalError(CBProError::Serde(e.to_string()))
+            }),
+            o => {
+                dbg!("Conduit._websocket_handler.handle_incoming: unknown result {:?}", o);
+                Message::None
+            }
+        };
+        if cmsg != Message::None {
+            _from.send(cmsg).await;
+        }
+    }
+
+    dbg!("Conduit. _websocket_handler._handle_outgoing handling...");
+    let (mut ws_write, mut ws_read) = ws.split();
     loop {
-        if to.is_empty() {
-            task::sleep(Duration::from_millis(100)).await;
-        } else {
-            let msg = serde_json::to_string(&to.recv().await.unwrap()).unwrap();
-            dbg!("Conduit. _websocket_handler sending{:?}", &msg);
-            ws.send(TMessage::Text(msg)).await;
-        }
-        if let _msg = ws.try_next().await {
-            dbg!("Conduit. _websocket_handler received {:?}", _msg);
-        }
+        futures::future::select(
+            handle_outgoing(&mut ws_write, to.borrow_mut()).boxed(),
+            handle_incoming(&mut ws_read, from.borrow_mut()).boxed()
+        ).await;
     }
 }
 

@@ -1,19 +1,16 @@
 use std::error::Error;
 use std::fmt;
 
-use serde_json;
-use async_tungstenite::{tungstenite};
-
-#[derive(Debug)]
+#[derive(Debug, PartialOrd, PartialEq)]
 pub enum CBProError {
-    Http(String),
-    Connect(tungstenite::Error),
-    Send(tungstenite::Error),
-    Read(tungstenite::Error),
-    Serde(serde_json::Error, String ),
     Coinbase(CBError),
+    Connect(String),
+    Http(String),
     Message(String),
-    Null
+    Null,
+    Read(String),
+    Send(String),
+    Serde(String ),
 }
 
 impl fmt::Display for CBProError {
@@ -24,10 +21,8 @@ impl fmt::Display for CBProError {
 
 impl Error for CBProError {}
 
-#[derive(Debug)]
-pub struct CBError {
-    pub message: String,
-}
+#[derive(Debug, PartialOrd, PartialEq)]
+pub struct CBError(String);
 
 impl Error for CBError {}
 
