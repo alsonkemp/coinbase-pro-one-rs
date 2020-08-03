@@ -28,13 +28,15 @@ coinbase-pro-one-rs = "0.0.1"
 
 See `/examples`.
 
-Run against the sandbox: `cargo run --example one`
+Run against the sandbox: `cargo run --example one` or `./run_one.sh`.
 
 # FIX API
 See the original author @ https://github.com/inv2004/coinbase-pro-rs for FIX requests.
 
 # OrderBook
 See the original author's @  https://github.com/inv2004/orderbook-rs (for `coinbase-pro-rs`) and/or `/examples` (for `coinbase-pro-one-rs`).
+
+Also, a growing implementation is in `/src/book/mod.rs`.
 
 # Objectives [more]
 
@@ -76,6 +78,8 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
 ## Example Output
 Note: `time` is HTTPS; `heartbeat` and `status` are WS.
+
+(The logging output is constantly changing (yay, debug `printf`s) so it might not look exactly like this...)
 
 ```
 [examples/one.rs:11] "One: starting" = "One: starting"
