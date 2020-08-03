@@ -466,6 +466,7 @@ pub struct Match {
 
 #[derive(Debug, Deserialize, PartialEq, Serialize)]
 #[serde(tag = "type")]
+#[serde(rename_all = "snake_case")]
 pub enum Message {
     Activate(Activate),
     Change(Change),
@@ -491,6 +492,7 @@ pub enum Message {
     None,
     Open(Open),
     Received(Received),
+    Status(Status),
     #[serde(rename = "subscribe")]
     Subscribe(Subscribe),
     Subscriptions {
@@ -863,6 +865,18 @@ pub struct Stats24H {
 }
 
 #[derive(Debug, Deserialize, PartialEq, Serialize)]
+pub struct Status {
+    #[serde(deserialize_with = "f64_from_string")]
+    pub open: f64,
+    #[serde(deserialize_with = "f64_from_string")]
+    pub high: f64,
+    #[serde(deserialize_with = "f64_from_string")]
+    pub low: f64,
+    #[serde(deserialize_with = "f64_from_string")]
+    pub volume: f64,
+}
+
+#[derive(Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum StopType {
     Entry,
@@ -948,6 +962,7 @@ impl Ticker {
 }
 
 #[derive(Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Time {
     pub iso: String,
     pub epoch: f64,

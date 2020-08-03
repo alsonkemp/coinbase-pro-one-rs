@@ -1,14 +1,15 @@
 #!feature(async_closure)]
 
 // STD IMPORTS
+use std::borrow::BorrowMut;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 // CRATE IMPORTS
-use async_std::{task, sync::{channel, Receiver, Sender}};
+use async_std::{task, pin::Pin, sync::{channel, Receiver, Sender}};
 use async_tungstenite::{async_std::{ConnectStream, connect_async}, WebSocketStream,
                         tungstenite::{protocol::Message as TMessage}};
 use crypto::{hmac::Hmac, mac::Mac};
-use futures_util::{stream::SplitSink, SinkExt, TryStreamExt, FutureExt, StreamExt};
+use futures_util::{stream::{SplitSink, SplitStream}, SinkExt, TryStreamExt, FutureExt, StreamExt};
 use reqwest::blocking::{Client};
 use serde_json;
 use serde_json::Value;
@@ -16,9 +17,6 @@ use serde_json::Value;
 // LOCAL IMPORTS
 use crate::structs::*;
 use crate::errors::{CBProError};
-use async_std::pin::Pin;
-use futures_util::stream::SplitStream;
-use std::borrow::BorrowMut;
 
 const CHANNEL_SIZE: usize = 128;
 const USER_AGENT: &str = concat!("coinbase-pro-one-rs/", env!("CARGO_PKG_VERSION"));
@@ -49,7 +47,7 @@ impl Conduit<'static> {
     /// Creates a new Conduit
     pub async fn new(http_uri: &'static str, ws_uri: &'static str, _creds: Option<Credentials<'static>>) ->
     (Conduit<'static>, Receiver<Message>) {
-        dbg!("Conduit.new: {:?} {:?} {:?}", http_uri, ws_uri, _creds);
+        debug!("Conduit.new: {:?} {:?} {:?}", http_uri, ws_uri, _creds);
         // Creates a new Conduit
         let credentials = if _creds.is_some() {
             let creds = _creds.unwrap();
@@ -65,14 +63,14 @@ impl Conduit<'static> {
         match connect_async(ws_uri).await {
             Err(e) => panic!("tungstenite: Failed to connect...: {:?}", e),
             Ok((ws, _)) => {
-                dbg!("Conduit: WebSocket handshake has been successfully completed...");
+                debug!("Conduit: WebSocket handshake has been successfully completed...");
 
                 let (sender, receiver) = channel::<Message>(CHANNEL_SIZE);
                 let (_to, to) = channel::<Message>(CHANNEL_SIZE);
                 let (from, _from) = channel::<Message>(CHANNEL_SIZE);
-                dbg!("Conduit: _websocket_handler: spawning...");
+                debug!("Conduit: _websocket_handler: spawning...");
                 task::spawn(async move {
-                    dbg!("Conduit: _websocket_handler: spawned...");
+                    debug!("Conduit: _websocket_handler: spawned...");
                     _websocket_handler(Pin::new(Box::new(ws)),
                                        Pin::new(Box::new(from)),
                                        Pin::new(Box::new(to))).await;
@@ -89,7 +87,6 @@ impl Conduit<'static> {
         }
     }
 
-
     pub fn sign(&self, ts: u64, method: reqwest::Method, uri: &str, body: &str) -> Option<String> {
         if self.credentials.is_none() {
             return None
@@ -102,7 +99,7 @@ impl Conduit<'static> {
         }
     }
 
-
+    //////////////////////////////////////////////////////////////
     /// Subscribe a Conduit to the Coinbase WS endpoint.
     pub async fn subscribe(& mut self, channels: &[Channel]) {
         let subscribe = Subscribe {
@@ -111,7 +108,7 @@ impl Conduit<'static> {
         };
 
         let msg = Message::Subscribe(subscribe);
-        dbg!("Conduit: subscription: sending {:?}", serde_json::to_string(&msg).unwrap());
+        debug!("Conduit: subscription: sending {:?}", serde_json::to_string(&msg).unwrap());
         self.to_websocket.send(msg).await;
     }
 
@@ -120,7 +117,7 @@ impl Conduit<'static> {
     ///
     ///
     async fn _request(& mut self, method: reqwest::Method, path: &str, body: Option<String>, _type: &str) {
-        dbg!("Conduit: _request:", &method, &path, &body);
+        debug!("Conduit: _request: {:?} {:?} {:?}", &method, &path, &body);
         let mut req = Client::new()
             .request(method.clone(), &format!("{}{}", self.base_http_uri, path))
             .header("User-Agent", USER_AGENT)
@@ -144,7 +141,9 @@ impl Conduit<'static> {
         let msg = if resp.is_err() {
             Message::InternalError(CBProError::Http(resp.err().unwrap().to_string()))
         } else {
-            convert_http(resp.unwrap(), _type).await
+            let _resp = resp.unwrap().text().unwrap();
+            debug!("RESP: {:?}", &_resp);
+            convert_http(_resp, _type).await
         };
         self.sender.send(msg).await;
     }
@@ -162,25 +161,40 @@ impl Conduit<'static> {
     ///
     ///
     pub async fn heartbeat(& mut self) {
-        dbg!("Conduit: heartbeat...");
+        debug!("Conduit: heartbeat...");
         self.subscribe(&[Channel::WithProduct{
             name: ChannelType::Heartbeat,
-            product_ids:vec!("BTC-USD".to_string())}]).await
+            product_ids:vec!("BTC-USD".to_string())}]
+        ).await
     }
-
+    pub async fn level2(& mut self) {
+        debug!("Conduit: level2...");
+        self.subscribe(
+            &[Channel::WithProduct{name: ChannelType::Level2, product_ids:vec!("BTC-USD".to_string())}]
+        ).await
+    }
     pub async fn products(&mut self) {
-        dbg!("Conduit: products sent...");
-        self._get("Products", "/products").await;
+        debug!("Conduit: products sent...");
+        self._get("products", "/products").await;
     }
     pub async fn status(& mut self) {
-        dbg!("Conduit: status...");
-        self.subscribe(&[Channel::Name(
-            ChannelType::Status
-        )]).await;
+        debug!("Conduit: status...");
+        self.subscribe(
+            &[Channel::Name(ChannelType::Status)]
+        ).await;
+    }
+    pub async fn ticker(& mut self, product_ids: Vec<String>) {
+        debug!("Conduit: ticker...");
+        self.subscribe(
+            &[Channel::WithProduct{
+                name: ChannelType::Ticker,
+                product_ids
+            }]
+        ).await;
     }
     pub async fn time(&mut self) {
-        dbg!("Conduit: time sent...");
-        self._get("Time", "/time").await;
+        debug!("Conduit: time sent...");
+        self._get("time", "/time").await;
     }
 
     /*
@@ -406,7 +420,7 @@ impl Conduit<'static> {
         {
     >>>>>>> Stashed changes
             let f = self
-                .call_feature(Method::DELETE, dbg!(&format!("/orders/{}", id)), "");
+                .call_feature(Method::DELETE, debug!(&format!("/orders/{}", id)), "");
 
             self._pub.adapter.process(f)
         }
@@ -618,14 +632,14 @@ impl Conduit<'static> {
             where
                     for<'de> U: serde::Deserialize<'de>,
         {
-            dbg!("REQ: {:?}", request);
+            debug!("REQ: {:?}", request);
 
             self.client
                 .request(request)
                 .map_err(CBError::Http)
                 .and_then(|res| res.into_body().concat2().map_err(CBError::Http))
                 .and_then(|body| {
-                    dbg!("RES: {:?}", body);
+                    debug!("RES: {:?}", body);
                     let res = serde_json::from_slice(&body).map_err(|e| {
                         serde_json::from_slice(&body)
                             .map(CBError::Coinbase)
@@ -731,8 +745,7 @@ impl Conduit<'static> {
     */
 }
 
-async fn convert_http(resp: reqwest::blocking::Response, _type: &str) -> Message {
-    let txt = resp.text().unwrap();
+async fn convert_http(txt: String, _type: &str) -> Message {
     let mut v: Value = serde_json::from_str(txt.as_str()).unwrap();
     v["type"] = serde_json::Value::String(_type.to_string());
     serde_json::from_value(v).unwrap_or_else(|e| {
@@ -763,7 +776,7 @@ pub fn _sign(&credentials: &Option<Credentials>, ts: u64, method: reqwest::Metho
 pub fn _auth(credentials: Option<Credentials<'static>>) -> Option<Auth> {
     match credentials{
         Some(c) => {
-            dbg!("Conduit: calculating auth...");
+            debug!("Conduit: calculating auth...");
             let ts = _timestamp();
             let signature = _sign(
                 &credentials,
@@ -781,7 +794,7 @@ pub fn _auth(credentials: Option<Credentials<'static>>) -> Option<Auth> {
             )
         },
         None => {
-            dbg!("Conduit: **not** calculating auth... ");
+            debug!("Conduit: **not** calculating auth... ");
             None
         }
     }
@@ -795,7 +808,7 @@ pub async fn _websocket_handler(    ws:   Pin<Box<WebSocketStream<ConnectStream>
             _ws_write: &mut SplitSink<Pin<Box<WebSocketStream<ConnectStream>>>, TMessage>,
             _to:       &mut  Pin<Box<Receiver<Message>>>) {
         let msg = serde_json::to_string(&_to.recv().await.unwrap()).unwrap();
-        dbg!("Conduit. _websocket_handler._handle_outgoing sending{:?}", &msg);
+        debug!("Conduit._websocket_handler._handle_outgoing sending{:?}", &msg);
         _ws_write.send(TMessage::Text(msg)).await.unwrap();
 
     };
@@ -804,23 +817,23 @@ pub async fn _websocket_handler(    ws:   Pin<Box<WebSocketStream<ConnectStream>
           mut _ws_read: &mut SplitStream<Pin<Box<WebSocketStream<ConnectStream>>>>,
               _from:    &mut Pin<Box<Sender<Message>>>) {
         let tmsg = _ws_read.try_next().await;
-        dbg!("Conduit. _websocket_handler._handle_incoming: received {:?}", &tmsg);
         let cmsg = match tmsg {
             Ok(Some(TMessage::Text(msg))) =>
                 serde_json::from_str(&msg).unwrap_or_else(|e| {
                     Message::InternalError(CBProError::Serde(e.to_string()))
             }),
             o => {
-                dbg!("Conduit._websocket_handler.handle_incoming: unknown result {:?}", o);
+                debug!("Conduit._websocket_handler.handle_incoming: unknown result {:?}", o);
                 Message::None
             }
         };
+        debug!("Conduit._websocket_handler._handle_incoming: received cmsg {:?}", cmsg);
         if cmsg != Message::None {
             _from.send(cmsg).await;
         }
     }
 
-    dbg!("Conduit. _websocket_handler._handle_outgoing handling...");
+    debug!("Conduit._websocket_handler._handle_outgoing handling...");
     let (mut ws_write, mut ws_read) = ws.split();
     loop {
         futures::future::select(

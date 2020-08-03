@@ -1,3 +1,4 @@
+
 #![feature(box_syntax)]
 #![feature(format_args_capture)]
 
@@ -8,6 +9,7 @@ extern crate chrono;
 extern crate crypto;
 extern crate futures;
 extern crate futures_util;
+#[macro_use]
 extern crate log;
 extern crate pretty_env_logger;
 extern crate reqwest;
@@ -18,6 +20,7 @@ extern crate uuid;
 extern crate url;
 
 
+pub mod book;
 pub mod client;
 pub mod errors;
 pub mod structs;

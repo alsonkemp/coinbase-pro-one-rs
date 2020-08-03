@@ -18,6 +18,7 @@ async-tungstenite = {version = "*", features = ["async-std-runtime", "async-tls"
 async-std = { version = "", features = [ "std", "unstable" ] }
 base64 = "*"
 chrono = { version = "*", features = [ "serde" ] }
+env_logger = "*"
 futures = "*"
 futures-util = "*"
 log = "*"
