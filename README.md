@@ -35,6 +35,7 @@ Run against the sandbox: `cargo run --example one` or `./run_one.sh`.
 
 # Example
 ## Code
+Note: `time()` is HTTPS; `heartbeat()` and `status()` are Websocket.
 
 `/examples/one.rs`:
 
@@ -69,8 +70,6 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>> {
 ```
 
 ## Output
-Note: `time` is HTTPS; `heartbeat` and `status` are WS.
-
 (The logging output is constantly changing (yay, debug `printf`s) so it might not look exactly like this...)
 
 ```
