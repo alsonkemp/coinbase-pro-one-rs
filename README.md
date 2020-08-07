@@ -23,7 +23,7 @@ coinbase-pro-one-rs = "0.0.1"
 ```
 
 # OrderBook
-Also, a growing implementation is in `/src/book/mod.rs`.
+See `/src/book/mod.rs`.
 
 The original author's @  https://github.com/inv2004/orderbook-rs (for `coinbase-pro-rs`).
 
