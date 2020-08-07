@@ -148,5 +148,5 @@ Note: `time` is HTTPS; `heartbeat` and `status` are WS.
 
 JetBrains for providing a complimentary Open Source License for:
 
-![CLion](/extra/logo_CLion.svg)
+![CLion](/extra/logo_CLion.png)
 
