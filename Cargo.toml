@@ -17,7 +17,7 @@ async-tls = "0.9.0"
 async-tungstenite = {version = "*", features = ["async-std-runtime", "async-tls"] }
 async-std = { version = "", features = [ "std", "unstable" ] }
 base64 = "*"
-chrono = { version = "*", features = [ "serde" ] }
+chrono = { version = "*", features = [ "std", "serde" ] }
 env_logger = "*"
 futures = "*"
 futures-util = "*"

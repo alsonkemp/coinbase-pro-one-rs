@@ -58,9 +58,8 @@ impl OrderBook {
         if !self.match_product_id(&product_id) {
             Some(Message::WSLevel2(WSLevel2::Snapshot {product_id, bids, asks}))
         } else {
-            bids.iter().map(|item| {
-                self._ingest_snapshot(&mut self.bid_book, item);
-            });
+            bids.iter().map(|item| { self._ingest_snapshot(&mut self.bid_book, item); });
+            asks.iter().map(|item| { self._ingest_snapshot(&mut self.ask_book, item); });
             None
         }
     }
@@ -75,9 +74,7 @@ impl OrderBook {
         if !self.match_product_id(&product_id) {
             Some(Message::WSLevel2(WSLevel2::L2update { product_id, changes }))
         } else {
-            bids.iter().map(|item| {
-                self._ingest_update(item);
-            });
+            bids.iter().map(|item| { self._ingest_update(item); });
             None
         }
     }

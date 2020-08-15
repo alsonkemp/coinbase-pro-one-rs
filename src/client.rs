@@ -1,15 +1,16 @@
 #!feature(async_closure)]
 
-use async_std::{ task, sync::{ channel, Arc, Mutex, Receiver, Sender }};
+use async_std::{ task, stream::interval, sync::{ channel, Arc, Mutex, Receiver, Sender }};
 use async_tungstenite::{ async_std::{ connect_async },
                          tungstenite::{protocol::Message as TMessage }};
+use chrono::
 use crypto::{hmac::Hmac, mac::Mac};
 use futures::{SinkExt, StreamExt};
 use futures_util::{FutureExt};
 use reqwest::blocking::{Client};
 use serde_json;
 use serde_json::Value;
-use std::{time::{ SystemTime, UNIX_EPOCH }};
+use std::{time::{ Duration, SystemTime, UNIX_EPOCH }};
 
 // LOCAL IMPORTS
 use crate::structs::*;
@@ -175,9 +176,7 @@ impl Conduit<'static> {
 
     pub async fn status(&mut self) {
         debug!("Conduit: status...");
-        self.subscribe(
-            &[Channel::Name(ChannelType::Status)]
-        ).await;
+        self.subscribe(&[Channel::Name(ChannelType::Status)]).await;
     }
 
     pub async fn ticker(&mut self, product_ids: Vec<String>) {
@@ -193,6 +192,11 @@ impl Conduit<'static> {
     pub async fn time(&mut self) {
         debug!("Conduit: time sent...");
         self._get("time", "/time").await;
+    }
+    pub async fn interval(&mut self, millis: u64) {
+       interval(Duration::from_millis(millis)).for_each(||{
+           self.to_mailbox.lock().await.send(Message::Interval{time: SystemTime::now()});
+       });
     }
 }
 

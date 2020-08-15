@@ -2,7 +2,7 @@ use chrono;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::borrow::Cow;
-
+use std::time::SystemTime;
 use uuid::Uuid;
 
 // use utils::datetime_from_string;
@@ -277,8 +277,6 @@ pub enum Granularity {
     D1 = 86400,
 }
 
-
-
 #[derive(Debug, Deserialize, PartialEq, Serialize)]
 pub struct Level2SnapshotRecord {
     #[serde(deserialize_with = "f64_from_string")]
@@ -320,6 +318,9 @@ pub enum Message {
         product_id: String,
         time: DateTime,
     },
+    // Just an interval notificaation.
+    #[serde(skip)]
+    Interval{time: DateTime},
     #[serde(skip)]
     InternalError(errors::CBProError),
     None,
