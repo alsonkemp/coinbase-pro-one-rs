@@ -1,9 +1,7 @@
 # HEAVILY Derived (err... copied...) from:
-
 https://github.com/inv2004/coinbase-pro-rs
 
 # Objectives
-
 See `Objectives [more]` below...
 
 This repo/project has the following objective (which differs from those of the original):
@@ -27,25 +25,20 @@ Cargo.toml:
 coinbase-pro-one-rs = "0.0.1"
 ```
 
+# OrderBook
+See `/src/book/mod.rs`.
+
+The original author's @  https://github.com/inv2004/orderbook-rs (for `coinbase-pro-rs`).
+
 # Examples
 
 See `/examples`.
 
 Run against the sandbox: `cargo run --example one` or `./run_one.sh`.
 
-# FIX API
-See the original author @ https://github.com/inv2004/coinbase-pro-rs for FIX requests.
-
-# OrderBook
-See the original author's @  https://github.com/inv2004/orderbook-rs (for `coinbase-pro-rs`) and/or `/examples` (for `coinbase-pro-one-rs`).
-
-Also, a growing implementation is in `/src/book/mod.rs`.
-
-# Objectives [more]
-
-The project's objective is to be able to talk to Coinbase however is best; you don't have to worry about it.
-
-## Example code
+# Example
+## Code
+Note: `time()` is HTTPS; `heartbeat()` and `status()` are Websocket.
 
 `/examples/one.rs`:
 
@@ -86,9 +79,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>> {
 }
 ```
 
-## Example Output
-Note: `time` is HTTPS; `heartbeat` and `status` are WS.
-
+## Output
 (The logging output is constantly changing (yay, debug `printf`s) so it might not look exactly like this...)
 
 ```
@@ -153,10 +144,10 @@ Note: `time` is HTTPS; `heartbeat` and `status` are WS.
     ),
 )
 ```
+# FIX API
+See the original author @ https://github.com/inv2004/coinbase-pro-rs for FIX requests.
 
 # Thanks
 
-JetBrains for providing a complimentary Open Source License for:
-
-![CLion](/extra/logo_CLion.svg)
-
+JetBrains for a complimentary Open Source License for:
+![CLion](/extra/logo_CLion.png)
