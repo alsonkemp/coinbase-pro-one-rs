@@ -11,6 +11,7 @@ extern crate futures;
 extern crate futures_util;
 #[macro_use]
 extern crate log;
+extern crate ordered_float;
 extern crate pretty_env_logger;
 extern crate reqwest;
 extern crate serde;

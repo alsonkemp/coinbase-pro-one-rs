@@ -135,25 +135,6 @@ pub enum AccountHoldsType {
     Transfer,
 }
 
-#[derive(Debug, Deserialize, PartialEq, Serialize)]
-pub struct Activate {
-    pub product_id: String,
-    #[serde(deserialize_with = "f64_from_string")]
-    pub timestamp: f64,
-    pub order_id: Uuid,
-    pub stop_type: StopType,
-    #[serde(deserialize_with = "f64_from_string")]
-    pub size: f64,
-    #[serde(deserialize_with = "f64_from_string")]
-    pub funds: f64,
-    #[serde(deserialize_with = "f64_from_string")]
-    pub taker_fee_rate: f64,
-    pub private: bool,
-    pub user_id: Option<String>,
-    #[serde(default)]
-    #[serde(deserialize_with = "uuid_opt_from_string")]
-    pub profile_id: Option<Uuid>,
-}
 
 #[derive(Debug, Deserialize, PartialEq, Serialize)]
 pub struct Auth {
@@ -229,31 +210,7 @@ pub struct Candle(
     pub f64,   // volume
 );
 
-#[derive(Debug, Deserialize, PartialEq, Serialize)]
-pub struct Change {
-    pub time: DateTime,
-    pub sequence: usize,
-    pub order_id: Uuid,
-    pub product_id: String,
-    #[serde(deserialize_with = "f64_from_string")]
-    pub new_size: f64,
-    #[serde(deserialize_with = "f64_from_string")]
-    pub old_size: f64,
-    #[serde(default)]
-    #[serde(deserialize_with = "f64_opt_from_string")]
-    pub new_funds: Option<f64>,
-    #[serde(default)]
-    #[serde(deserialize_with = "f64_opt_from_string")]
-    pub old_funds: Option<f64>,
-    #[serde(default)]
-    #[serde(deserialize_with = "f64_opt_from_string")]
-    pub price: Option<f64>,
-    pub side: OrderSide,
-    pub user_id: Option<String>,
-    #[serde(default)]
-    #[serde(deserialize_with = "uuid_opt_from_string")]
-    pub profile_id: Option<Uuid>,
-}
+
 #[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
 #[serde(untagged)]
 pub enum Channel {
@@ -285,34 +242,6 @@ pub struct Currency {
     pub min_size: f64,
 }
 
-#[derive(Debug, Deserialize, PartialEq, Serialize)]
-#[serde(untagged)]
-pub enum Done {
-    Limit {
-        time: DateTime,
-        product_id: String,
-        sequence: Option<usize>,
-        #[serde(deserialize_with = "f64_from_string")]
-        price: f64,
-        order_id: Uuid,
-        reason: Reason,
-        side: OrderSide,
-        #[serde(deserialize_with = "f64_from_string")]
-        remaining_size: f64,
-        user_id: Option<String>,
-        #[serde(default)]
-        #[serde(deserialize_with = "uuid_opt_from_string")]
-        profile_id: Option<Uuid>,
-    },
-    Market {
-        time: DateTime,
-        product_id: String,
-        sequence: usize,
-        order_id: Uuid,
-        reason: Reason,
-        side: OrderSide,
-    },
-}
 
 #[derive(Debug, Deserialize, PartialEq, Serialize)]
 pub struct Fill {
@@ -338,56 +267,6 @@ pub enum FillLiquidity {
     T
 }
 
-#[derive(Debug, Deserialize, PartialEq, Serialize)]
-pub enum Full {
-    Received(Received),
-    Open(Open),
-    Done(Done),
-    Match(Match),
-    Change(Change),
-    Activate(Activate),
-}
-
-impl Full {
-    pub fn price(&self) -> Option<&f64> {
-        match self {
-            Full::Received(Received::Limit { price, .. }) => Some(price),
-            Full::Received(Received::Market { .. }) => None,
-            Full::Open(Open { price, .. }) => Some(price),
-            Full::Done(Done::Limit { price, .. }) => Some(price),
-            Full::Done(Done::Market { .. }) => None,
-            Full::Match(Match { price, .. }) => Some(price),
-            Full::Change(Change { price, .. }) => price.as_ref(),
-            Full::Activate(Activate { .. }) => None,
-        }
-    }
-
-    pub fn time(&self) -> Option<&DateTime> {
-        match self {
-            Full::Received(Received::Limit { time, .. }) => Some(time),
-            Full::Received(Received::Market { time, .. }) => Some(time),
-            Full::Open(Open { time, .. }) => Some(time),
-            Full::Done(Done::Limit { time, .. }) => Some(time),
-            Full::Done(Done::Market { time, .. }) => Some(time),
-            Full::Match(Match { time, .. }) => Some(time),
-            Full::Change(Change { time, .. }) => Some(time),
-            Full::Activate(Activate { .. }) => None,
-        }
-    }
-
-    pub fn sequence(&self) -> Option<&usize> {
-        match self {
-            Full::Received(Received::Limit { sequence, .. }) => Some(sequence),
-            Full::Received(Received::Market { sequence, .. }) => Some(sequence),
-            Full::Open(Open { sequence, .. }) => Some(sequence),
-            Full::Done(Done::Limit { sequence, .. }) => sequence.as_ref(),
-            Full::Done(Done::Market { sequence, .. }) => Some(sequence),
-            Full::Match(Match { sequence, .. }) => Some(sequence),
-            Full::Change(Change { sequence, .. }) => Some(sequence),
-            Full::Activate(Activate { .. }) => None,
-        }
-    }
-}
 
 pub enum Granularity {
     M1 = 60,
@@ -399,18 +278,6 @@ pub enum Granularity {
 }
 
 
-#[derive(Debug, Deserialize, PartialEq, Serialize)]
-pub enum Level2 {
-    Snapshot {
-        product_id: String,
-        bids: Vec<Level2SnapshotRecord>,
-        asks: Vec<Level2SnapshotRecord>,
-    },
-    L2update {
-        product_id: String,
-        changes: Vec<Level2UpdateRecord>,
-    },
-}
 
 #[derive(Debug, Deserialize, PartialEq, Serialize)]
 pub struct Level2SnapshotRecord {
@@ -429,9 +296,6 @@ pub struct Level2UpdateRecord {
     pub size: f64,
 }
 
-
-
-
 #[derive(Debug, Deserialize, PartialEq, Serialize)]
 #[serde(untagged)]
 pub enum MarketType {
@@ -439,72 +303,36 @@ pub enum MarketType {
     Funds { funds: f64 },
 }
 
-#[derive(Debug, Deserialize, PartialEq, Serialize)]
-pub struct Match {
-    pub sequence: usize,
-    pub maker_order_id: Uuid,
-    pub taker_order_id: Uuid,
-    pub maker_user_id: Option<String>,
-    pub maker_profile_id: Option<Uuid>,
-    #[serde(deserialize_with = "f64_from_string")]
-    pub price: f64,
-    pub product_id: String,
-    #[serde(default)]
-    #[serde(deserialize_with = "uuid_opt_from_string")]
-    pub profile_id: Option<Uuid>,
-    #[serde(deserialize_with = "f64_from_string")]
-    pub size: f64,
-    pub side: OrderSide,
-    pub taker_user_id: Option<String>,
-    pub taker_profile_id: Option<Uuid>,
-    pub time: DateTime,
-    pub trade_id: usize,
-    pub user_id: Option<String>,
-}// limit:{"id":"e9d0ff7a-ed50-4040-87a7-c884ae562807","price":"1.12000000","size":"1.00000000","product_id":"BTC-USD","side":"buy","stp":"dc","type":"limit","time_in_force":"GTC","post_only":true,"created_at":"2018-08-23T18:53:42.144811Z","fill_fees":"0.0000000000000000","filled_size":"0.00000000","executed_value":"0.0000000000000000","status":"pending","settled":false}
+
+// limit:{"id":"e9d0ff7a-ed50-4040-87a7-c884ae562807","price":"1.12000000","size":"1.00000000","product_id":"BTC-USD","side":"buy","stp":"dc","type":"limit","time_in_force":"GTC","post_only":true,"created_at":"2018-08-23T18:53:42.144811Z","fill_fees":"0.0000000000000000","filled_size":"0.00000000","executed_value":"0.0000000000000000","status":"pending","settled":false}
 // market:{"id":"ea565dc3-1656-49d7-bcdb-d99981ce35a7","size":"0.00100000","product_id":"BTC-USD","side":"buy","stp":"dc","funds":"28.2449436100000000","type":"market","post_only":false,"created_at":"2018-08-23T18:43:18.964413Z","fill_fees":"0.0000000000000000","filled_size":"0.00000000","executed_value":"0.0000000000000000","status":"pending","settled":false}
 // call:[{"id":"063da13d-6aba-45e1-91ca-89f8514da989","price":"100000.00000000","size":"0.00100000","product_id":"BTC-USD","side":"sell","type":"limit","time_in_force":"GTC","post_only":true,"created_at":"2018-08-24T04:50:01.139098Z","fill_fees":"0.0000000000000000","filled_size":"0.00000000","executed_value":"0.0000000000000000","status":"open","settled":false}]
-
 #[derive(Debug, Deserialize, PartialEq, Serialize)]
 #[serde(tag = "type")]
 #[serde(rename_all = "snake_case")]
 pub enum Message {
-    Activate(Activate),
-    Change(Change),
-    Done(Done),
     Error {
         message: String,
     },
-    Full(Full),
     Heartbeat {
         sequence: usize,
         last_trade_id: usize,
         product_id: String,
         time: DateTime,
     },
-    L2update {
-        product_id: String,
-        changes: Vec<Level2UpdateRecord>,
-    },
     #[serde(skip)]
     InternalError(errors::CBProError),
-    Level2(Level2),
-    Match(Match),
     None,
-    Open(Open),
-    Received(Received),
     Status(Status),
     #[serde(rename = "subscribe")]
     Subscribe(Subscribe),
     Subscriptions {
         channels: Vec<Channel>,
     },
-    Snapshot {
-        product_id: String,
-        bids: Vec<Level2SnapshotRecord>,
-        asks: Vec<Level2SnapshotRecord>,
-    },
     Ticker(Ticker),
-    Time(Time)
+    Time(Time),
+    WSFull(WSFull),
+    WSLevel2(WSLevel2),
 }
 
 /*
@@ -563,24 +391,6 @@ impl From<InputMessage> for Message {
 }
 */
 
-
-#[derive(Debug, Deserialize, PartialEq, Serialize)]
-pub struct Open {
-    pub order_id: Uuid,
-    #[serde(deserialize_with = "f64_from_string")]
-    pub price: f64,
-    pub product_id: String,
-    #[serde(default)]
-    #[serde(deserialize_with = "uuid_opt_from_string")]
-    pub profile_id: Option<Uuid>,
-    #[serde(deserialize_with = "f64_from_string")]
-    pub remaining_size: f64,
-    pub sequence: usize,
-    pub side: OrderSide,
-    pub time: DateTime,
-    pub user_id: Option<String>,
-
-}
 
 
 #[derive(Debug, Deserialize, PartialEq, Serialize)]
@@ -817,40 +627,6 @@ pub enum Reason {
     Canceled,
 }
 
-#[derive(Debug, Deserialize, PartialEq, Serialize)]
-#[serde(tag = "order_type")]
-#[serde(rename_all = "camelCase")]
-pub enum Received {
-    Limit {
-        time: DateTime,
-        product_id: String,
-        sequence: usize,
-        order_id: Uuid,
-        #[serde(deserialize_with = "uuid_opt_from_string")]
-        client_oid: Option<Uuid>,
-        #[serde(deserialize_with = "f64_from_string")]
-        size: f64,
-        #[serde(deserialize_with = "f64_from_string")]
-        price: f64,
-        side: OrderSide,
-        user_id: Option<String>,
-        #[serde(default)]
-        #[serde(deserialize_with = "uuid_opt_from_string")]
-        profile_id: Option<Uuid>,
-    },
-    Market {
-        time: DateTime,
-        product_id: String,
-        sequence: usize,
-        order_id: Uuid,
-        #[serde(deserialize_with = "uuid_opt_from_string")]
-        client_oid: Option<Uuid>,
-        #[serde(default)]
-        #[serde(deserialize_with = "f64_opt_from_string")]
-        funds: Option<f64>,
-        side: OrderSide,
-    },
-}
 
 #[derive(Debug, Deserialize, PartialEq, Serialize)]
 pub struct Stats24H {
@@ -866,14 +642,22 @@ pub struct Stats24H {
 
 #[derive(Debug, Deserialize, PartialEq, Serialize)]
 pub struct Status {
+    pub currencies: Vec<StatusCurrency>,
+}
+
+#[derive(Debug, Deserialize, PartialEq, Serialize)]
+pub struct StatusCurrency {
+    pub id: String,
+    pub name: String,
     #[serde(deserialize_with = "f64_from_string")]
-    pub open: f64,
+    pub min_size: f64,
+    pub status: String,
+    pub funding_account_id: String,
+    pub status_message: String,
     #[serde(deserialize_with = "f64_from_string")]
-    pub high: f64,
-    #[serde(deserialize_with = "f64_from_string")]
-    pub low: f64,
-    #[serde(deserialize_with = "f64_from_string")]
-    pub volume: f64,
+    pub max_precision: f64,
+    pub convertible_to: Vec<String>,
+    pub details: serde_json::Value
 }
 
 #[derive(Debug, Deserialize, PartialEq, Serialize)]
@@ -897,32 +681,6 @@ pub enum SubscribeCmd {
     Subscribe,
 }
 
-#[derive(Debug, Deserialize, PartialEq, Serialize)]
-#[serde(untagged)]
-#[serde(rename_all = "camelCase")]
-pub enum Ticker {
-    Full {
-        #[serde(deserialize_with = "f64_nan_from_string")]
-        best_ask: f64,
-        #[serde(deserialize_with = "f64_nan_from_string")]
-        best_bid: f64,
-        #[serde(deserialize_with = "f64_from_string")]
-        last_size: f64,
-        product_id: String,
-        #[serde(deserialize_with = "f64_from_string")]
-        price: f64,
-        sequence: usize,
-        side: OrderSide,
-        time: DateTime,
-        trade_id: usize,
-    },
-    Empty {
-        sequence: usize,
-        product_id: String,
-        #[serde(deserialize_with = "f64_nan_from_string")]
-        price: f64,
-    },
-}
 
 impl Ticker {
     pub fn price(&self) -> &f64 {
@@ -978,7 +736,6 @@ pub struct TrailingVolume {
     pub recorded_at: DateTime,
 }
 
-
 #[derive(Debug, Deserialize, PartialEq, Serialize)]
 pub struct Trade {
     pub time: DateTime,
@@ -990,6 +747,244 @@ pub struct Trade {
     pub side: OrderSide,
 }
 
+#[derive(Debug, Deserialize, PartialEq, Serialize)]
+pub enum WSFull {
+    Activate(WSFullActivate),
+    Change(WSFullChange),
+    Done(WSFullDone),
+    Match(WSFullMatch),
+    Open(WSFullOpen),
+    Received(WSFullReceived),
+}
+
+impl WSFull {
+    pub fn price(&self) -> Option<&f64> {
+        match self {
+            WSFull::Activate(WSFullActivate { .. }) => None,
+            WSFull::Change(WSFullChange { price, .. }) => price.as_ref(),
+            WSFull::Done(WSFullDone::Limit { price, .. }) => Some(price),
+            WSFull::Done(WSFullDone::Market { .. }) => None,
+            WSFull::Match(WSFullMatch { price, .. }) => Some(price),
+            WSFull::Open(WSFullOpen { price, .. }) => Some(price),
+            WSFull::Received(WSFullReceived::Limit { price, .. }) => Some(price),
+            WSFull::Received(WSFullReceived::Market { .. }) => None,
+        }
+    }
+
+    pub fn time(&self) -> Option<&DateTime> {
+        match self {
+            WSFull::Activate(WSFullActivate { .. }) => None,
+            WSFull::Change(WSFullChange { time, .. }) => Some(time),
+            WSFull::Done(WSFullDone::Limit { time, .. }) => Some(time),
+            WSFull::Done(WSFullDone::Market { time, .. }) => Some(time),
+            WSFull::Match(WSFullMatch { time, .. }) => Some(time),
+            WSFull::Open(WSFullOpen { time, .. }) => Some(time),
+            WSFull::Received(WSFullReceived::Limit { time, .. }) => Some(time),
+            WSFull::Received(WSFullReceived::Market { time, .. }) => Some(time),
+        }
+    }
+
+    pub fn sequence(&self) -> Option<&usize> {
+        match self {
+            WSFull::Activate(WSFullActivate { .. }) => None,
+            WSFull::Change(WSFullChange { sequence, .. }) => Some(sequence),
+            WSFull::Done(WSFullDone::Limit { sequence, .. }) => sequence.as_ref(),
+            WSFull::Done(WSFullDone::Market { sequence, .. }) => Some(sequence),
+            WSFull::Match(WSFullMatch { sequence, .. }) => Some(sequence),
+            WSFull::Open(WSFullOpen { sequence, .. }) => Some(sequence),
+            WSFull::Received(WSFullReceived::Limit { sequence, .. }) => Some(sequence),
+            WSFull::Received(WSFullReceived::Market { sequence, .. }) => Some(sequence),
+        }
+    }
+}#[derive(Debug, Deserialize, PartialEq, Serialize)]
+pub struct WSFullActivate {
+    pub product_id: String,
+    #[serde(deserialize_with = "f64_from_string")]
+    pub timestamp: f64,
+    pub order_id: Uuid,
+    pub stop_type: StopType,
+    #[serde(deserialize_with = "f64_from_string")]
+    pub size: f64,
+    #[serde(deserialize_with = "f64_from_string")]
+    pub funds: f64,
+    #[serde(deserialize_with = "f64_from_string")]
+    pub taker_fee_rate: f64,
+    pub private: bool,
+    pub user_id: Option<String>,
+    #[serde(default)]
+    #[serde(deserialize_with = "uuid_opt_from_string")]
+    pub profile_id: Option<Uuid>,
+}
+#[derive(Debug, Deserialize, PartialEq, Serialize)]
+#[serde(untagged)]
+pub enum WSFullDone {
+    Limit {
+        time: DateTime,
+        product_id: String,
+        sequence: Option<usize>,
+        #[serde(deserialize_with = "f64_from_string")]
+        price: f64,
+        order_id: Uuid,
+        reason: Reason,
+        side: OrderSide,
+        #[serde(deserialize_with = "f64_from_string")]
+        remaining_size: f64,
+        user_id: Option<String>,
+        #[serde(default)]
+        #[serde(deserialize_with = "uuid_opt_from_string")]
+        profile_id: Option<Uuid>,
+    },
+    Market {
+        time: DateTime,
+        product_id: String,
+        sequence: usize,
+        order_id: Uuid,
+        reason: Reason,
+        side: OrderSide,
+    },
+}
+
+#[derive(Debug, Deserialize, PartialEq, Serialize)]
+pub struct WSFullChange {
+    pub time: DateTime,
+    pub sequence: usize,
+    pub order_id: Uuid,
+    pub product_id: String,
+    #[serde(deserialize_with = "f64_from_string")]
+    pub new_size: f64,
+    #[serde(deserialize_with = "f64_from_string")]
+    pub old_size: f64,
+    #[serde(default)]
+    #[serde(deserialize_with = "f64_opt_from_string")]
+    pub new_funds: Option<f64>,
+    #[serde(default)]
+    #[serde(deserialize_with = "f64_opt_from_string")]
+    pub old_funds: Option<f64>,
+    #[serde(default)]
+    #[serde(deserialize_with = "f64_opt_from_string")]
+    pub price: Option<f64>,
+    pub side: OrderSide,
+    pub user_id: Option<String>,
+    #[serde(default)]
+    #[serde(deserialize_with = "uuid_opt_from_string")]
+    pub profile_id: Option<Uuid>,
+}
+
+#[derive(Debug, Deserialize, PartialEq, Serialize)]
+pub struct WSFullMatch {
+    pub sequence: usize,
+    pub maker_order_id: Uuid,
+    pub taker_order_id: Uuid,
+    pub maker_user_id: Option<String>,
+    pub maker_profile_id: Option<Uuid>,
+    #[serde(deserialize_with = "f64_from_string")]
+    pub price: f64,
+    pub product_id: String,
+    #[serde(default)]
+    #[serde(deserialize_with = "uuid_opt_from_string")]
+    pub profile_id: Option<Uuid>,
+    #[serde(deserialize_with = "f64_from_string")]
+    pub size: f64,
+    pub side: OrderSide,
+    pub taker_user_id: Option<String>,
+    pub taker_profile_id: Option<Uuid>,
+    pub time: DateTime,
+    pub trade_id: usize,
+    pub user_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize, PartialEq, Serialize)]
+pub struct WSFullOpen {
+    pub order_id: Uuid,
+    #[serde(deserialize_with = "f64_from_string")]
+    pub price: f64,
+    pub product_id: String,
+    #[serde(default)]
+    #[serde(deserialize_with = "uuid_opt_from_string")]
+    pub profile_id: Option<Uuid>,
+    #[serde(deserialize_with = "f64_from_string")]
+    pub remaining_size: f64,
+    pub sequence: usize,
+    pub side: OrderSide,
+    pub time: DateTime,
+    pub user_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize, PartialEq, Serialize)]
+#[serde(tag = "order_type")]
+#[serde(rename_all = "camelCase")]
+pub enum WSFullReceived {
+    Limit {
+        product_id: String,
+        sequence: usize,
+        order_id: Uuid,
+        #[serde(deserialize_with = "uuid_opt_from_string")]
+        client_oid: Option<Uuid>,
+        #[serde(deserialize_with = "f64_from_string")]
+        size: f64,
+        #[serde(deserialize_with = "f64_from_string")]
+        price: f64,
+        side: OrderSide,
+        user_id: Option<String>,
+        #[serde(default)]
+        #[serde(deserialize_with = "uuid_opt_from_string")]
+        profile_id: Option<Uuid>,
+        time: DateTime,
+    },
+    Market {
+        #[serde(deserialize_with = "uuid_opt_from_string")]
+        client_oid: Option<Uuid>,
+        #[serde(default)]
+        #[serde(deserialize_with = "f64_opt_from_string")]
+        funds: Option<f64>,
+        order_id: Uuid,
+        product_id: String,
+        sequence: usize,
+        side: OrderSide,
+        time: DateTime,
+    },
+}
+
+#[derive(Debug, Deserialize, PartialEq, Serialize)]
+#[serde(tag = "type")]
+pub enum WSLevel2 {
+    Snapshot {
+        product_id: String,
+        bids: Vec<Level2SnapshotRecord>,
+        asks: Vec<Level2SnapshotRecord>,
+    },
+    L2update {
+        product_id: String,
+        changes: Vec<Level2UpdateRecord>,
+    },
+}
+
+#[derive(Debug, Deserialize, PartialEq, Serialize)]
+#[serde(untagged)]
+#[serde(rename_all = "camelCase")]
+pub enum WSTicker {
+    Full {
+        #[serde(deserialize_with = "f64_nan_from_string")]
+        best_ask: f64,
+        #[serde(deserialize_with = "f64_nan_from_string")]
+        best_bid: f64,
+        #[serde(deserialize_with = "f64_from_string")]
+        last_size: f64,
+        #[serde(deserialize_with = "f64_from_string")]
+        price: f64,
+        product_id: String,
+        sequence: usize,
+        side: OrderSide,
+        time: DateTime,
+        trade_id: usize,
+    },
+    Empty {
+        sequence: usize,
+        product_id: String,
+        #[serde(deserialize_with = "f64_nan_from_string")]
+        price: f64,
+    },
+}
 
 #[cfg(test)]
 mod tests {

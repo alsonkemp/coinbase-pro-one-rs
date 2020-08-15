@@ -1,36 +1,40 @@
 extern crate coinbase_pro_one_rs;
 #[macro_use]
-extern crate  log;
+extern crate log;
 
-use std::time::Duration;
-
-use async_std::{task};
-use futures_util::{ StreamExt };
+use async_std::{task,
+                sync::{Arc, Mutex}};
 
 use coinbase_pro_one_rs::*;
-use coinbase_pro_one_rs::book::OrderBook;
-use async_std::pin::Pin;
+use coinbase_pro_one_rs::book::l2::OrderBook;
 
 fn main() -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    // Sync
     env_logger::init();
     debug!("One: starting");
+
+    // Async so that conduit methods aren't wait-y.
     task::block_on(async {
-        let mut order_book = OrderBook::new();
-        let (mut conduit, receiver) = client::Conduit::new(SANDBOX_URL, WS_SANDBOX_URL, None).await;
-        conduit.level2().await;
-        conduit.ticker(vec!("BTC-USD".to_string())).await;
-        conduit.time().await;
-        conduit.heartbeat().await;
-        conduit.status().await;
-        conduit.time().await;
-        // Need to box this outside of the loop to avoid recurrent ownership issues.
-        let mut harvested =
-            order_book.harvest(Pin::new(Box::new(receiver))).await;
+        let (mut conduit, mailbox) = client::Conduit::new(
+            SANDBOX_URL, WS_SANDBOX_URL, None).await;
+        let btc_order_book =
+            Arc::new(Mutex::new(OrderBook::new("BTC-USD".to_string())));
+
+        let product_ids = vec!("BTC-USD".to_string());
+        conduit.level2().await;            // HTTP
+        conduit.level2_ws().await;         // WS
+        conduit.ticker(product_ids).await; // WS
+        conduit.time().await;              // HTTP
+        conduit.heartbeat().await;         //WS
         loop {
-            let msg = &mut harvested.next().await;
-            debug!("One: receiver.next: {:?}", msg);
+            btc_order_book.lock().await
+                .harvest(&mailbox).await
+                .map(|msg: structs::Message| {
+                debug!("One: receiver.next: {:?}\n", &msg);
+            });
         }
     });
+    println!("EXITING...");
     Ok(())
 }
 

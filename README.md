@@ -17,6 +17,9 @@ This repo/project has the following objective (which differs from those of the o
 * Supports async data only
 * Public/private feeds are supported
 
+The following are not intended to be supported:
+* REST calls that are better serviced by WS (e.g. Ticker).
+
 # Usage
 Cargo.toml:
 ```toml
@@ -47,31 +50,38 @@ The project's objective is to be able to talk to Coinbase however is best; you d
 `/examples/one.rs`:
 
 ```
-extern crate coinbase_pro_one_rs;
+#[macro_use]
+extern crate log;
 
-use std::time::Duration;
-
-use async_std::{task};
-use futures_util::{ StreamExt };
+use async_std::{task,
+                sync::{Arc, Mutex}};
 
 use coinbase_pro_one_rs::*;
+use coinbase_pro_one_rs::book::OrderBook;
 
 fn main() -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    dbg!("One: starting");
+    // Sync
+    env_logger::init();
+    debug!("One: starting");
+
+    // Async so that conduit methods aren't wait-y.
     task::block_on(async {
-        let (mut conduit, mut receiver) = client::Conduit::new(SANDBOX_URL, WS_SANDBOX_URL, None).await;
-        conduit.time().await;      // HTTP(S) REST call
-        conduit.heartbeat().await; // Websocket call
-        conduit.status().await;    // Websocket call
+        let (mut conduit, mailbox) = client::Conduit::new(
+            SANDBOX_URL, WS_SANDBOX_URL, None).await;
+        let order_book = Arc::new(Mutex::new(OrderBook::new()));
+
+        let product_ids = vec!("BTC-USD".to_string());
+        conduit.level2().await;            // WS
+        conduit.ticker(product_ids).await; // WS
+        conduit.time().await;              // HTTP
+        conduit.heartbeat().await;         //WS
         loop {
-            if receiver.is_empty() {
-                task::sleep(Duration::from_millis(10)).await;
-            } else {
-                let resp = receiver.next().await;
-                dbg!("One: next: {:?}", resp); // Print the HTTPS/WS response (Message)
-            }
+            order_book.lock().await.harvest(&mailbox).await.map(|msg: structs::Message| {
+                debug!("One: receiver.next: {:?}\n", &msg);
+            });
         }
     });
+    println!("EXITING...");
     Ok(())
 }
 ```
