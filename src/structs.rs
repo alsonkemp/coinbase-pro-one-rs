@@ -1,8 +1,8 @@
 use chrono;
 use serde::{Deserialize, Serialize};
-use std::fmt;
-use std::borrow::Cow;
-use std::time::SystemTime;
+use std::{ borrow::Cow,
+           fmt};
+
 use uuid::Uuid;
 
 // use utils::datetime_from_string;
@@ -15,6 +15,16 @@ use crate::errors;
 
 //////////////////////////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////////////////
+// DATETIME HELPERS
+//////////////////////////////////////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////////////////////
+pub type DateTime = chrono::DateTime<chrono::Utc>;
+pub fn now() -> DateTime {
+    chrono::Utc::now()
+}
+
+//////////////////////////////////////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////////////////////
 // ALPHABETIZE ALPHABETIZE ALPHABETIZE ALPHABETIZE ALPHABETIZE ALPHABETIZE ALPHABETIZE
 // ALPHABETIZE ALPHABETIZE ALPHABETIZE ALPHABETIZE ALPHABETIZE ALPHABETIZE ALPHABETIZE
 // ALPHABETIZE ALPHABETIZE ALPHABETIZE ALPHABETIZE ALPHABETIZE ALPHABETIZE ALPHABETIZE
@@ -23,8 +33,6 @@ use crate::errors;
 //////////////////////////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////////////////
 
-// Type aliases
-pub type DateTime = chrono::DateTime<chrono::Utc>;
 
 #[derive(Debug, Deserialize, PartialEq, Serialize)]
 pub struct Account {
@@ -210,29 +218,12 @@ pub struct Candle(
     pub f64,   // volume
 );
 
-
-#[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
-#[serde(untagged)]
-pub enum Channel {
-    Name(ChannelType),
-    WithProduct {
-        name: ChannelType,
-        product_ids: Vec<String>,
-    },
+#[derive(Clone, Copy, Debug, Deserialize)]
+pub struct Credentials<'a> {
+    pub key: &'a str,
+    pub secret: &'a str,
+    pub passphrase:&'a str
 }
-
-#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
-#[serde(rename_all = "camelCase")]
-pub enum ChannelType {
-    Full,
-    Heartbeat,
-    Level2,
-    Matches,
-    Status,
-    Ticker,
-    User
-}
-
 
 #[derive(Debug, Deserialize, PartialEq, Serialize)]
 pub struct Currency {
@@ -267,7 +258,6 @@ pub enum FillLiquidity {
     T
 }
 
-
 pub enum Granularity {
     M1 = 60,
     M5 = 300,
@@ -301,7 +291,6 @@ pub enum MarketType {
     Funds { funds: f64 },
 }
 
-
 // limit:{"id":"e9d0ff7a-ed50-4040-87a7-c884ae562807","price":"1.12000000","size":"1.00000000","product_id":"BTC-USD","side":"buy","stp":"dc","type":"limit","time_in_force":"GTC","post_only":true,"created_at":"2018-08-23T18:53:42.144811Z","fill_fees":"0.0000000000000000","filled_size":"0.00000000","executed_value":"0.0000000000000000","status":"pending","settled":false}
 // market:{"id":"ea565dc3-1656-49d7-bcdb-d99981ce35a7","size":"0.00100000","product_id":"BTC-USD","side":"buy","stp":"dc","funds":"28.2449436100000000","type":"market","post_only":false,"created_at":"2018-08-23T18:43:18.964413Z","fill_fees":"0.0000000000000000","filled_size":"0.00000000","executed_value":"0.0000000000000000","status":"pending","settled":false}
 // call:[{"id":"063da13d-6aba-45e1-91ca-89f8514da989","price":"100000.00000000","size":"0.00100000","product_id":"BTC-USD","side":"sell","type":"limit","time_in_force":"GTC","post_only":true,"created_at":"2018-08-24T04:50:01.139098Z","fill_fees":"0.0000000000000000","filled_size":"0.00000000","executed_value":"0.0000000000000000","status":"open","settled":false}]
@@ -312,28 +301,42 @@ pub enum Message {
     Error {
         message: String,
     },
-    Heartbeat {
+    #[serde(skip)]
+    InternalError(errors::CBProError),
+    Interval(DateTime),
+    None,
+    Time(Time),
+    #[serde(rename = "full")]
+    WSFull(WSFull),
+    #[serde(rename = "heartbeat")]
+    WSHeartbeat {
         sequence: usize,
         last_trade_id: usize,
         product_id: String,
         time: DateTime,
     },
-    // Just an interval notificaation.
-    #[serde(skip)]
-    Interval{time: DateTime},
-    #[serde(skip)]
-    InternalError(errors::CBProError),
-    None,
-    Status(Status),
-    #[serde(rename = "subscribe")]
-    Subscribe(Subscribe),
-    Subscriptions {
-        channels: Vec<Channel>,
+    #[serde(rename = "l2update")]
+    WSL2update {
+        product_id: String,
+        time: DateTime,
+        changes: Vec<Level2UpdateRecord>,
     },
-    Ticker(Ticker),
-    Time(Time),
-    WSFull(WSFull),
-    WSLevel2(WSLevel2),
+    #[serde(alias = "snapshot")]
+    WSSnapshot {
+        product_id: String,
+        bids: Vec<Level2SnapshotRecord>,
+        asks: Vec<Level2SnapshotRecord>,
+    },
+    #[serde(rename = "status")]
+    WSStatus(WSStatus),
+    #[serde(rename = "subscribe")]
+    WSSubscribe(WSSubscribe),
+    #[serde(rename = "subscriptions")]
+    WSSubscriptions {
+        channels: Vec<WSChannel>,
+    },
+    #[serde(rename = "ticker")]
+    WSTicker(WSTicker),
 }
 
 /*
@@ -479,7 +482,7 @@ impl<'a> Order<'a> {
                 time_in_force: OrderTimeInForce::GTC,
             },
             client_oid: None,
-            created_at: chrono::Utc::now(),
+            created_at: now(),
             executed_value: None,
             fill_fees: None,
             filled_size: None,
@@ -504,7 +507,7 @@ impl<'a> Order<'a> {
                 funds: 0.0,
             },
             client_oid: None,
-            created_at: chrono::Utc::now(),
+            created_at: now(),
             executed_value: None,
             fill_fees: None,
             filled_size: None,
@@ -641,10 +644,6 @@ pub struct Stats24H {
     pub volume: f64,
 }
 
-#[derive(Debug, Deserialize, PartialEq, Serialize)]
-pub struct Status {
-    pub currencies: Vec<StatusCurrency>,
-}
 
 #[derive(Debug, Deserialize, PartialEq, Serialize)]
 pub struct StatusCurrency {
@@ -666,58 +665,6 @@ pub struct StatusCurrency {
 pub enum StopType {
     Entry,
     Exit,
-}
-
-#[derive(Debug, Deserialize, PartialEq, Serialize)]
-#[serde(rename = "subscribe")]
-pub struct Subscribe {
-    pub channels: Vec<Channel>,
-    #[serde(flatten)]
-    pub auth: Option<Auth>,
-}
-
-#[derive(Debug, Deserialize, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub enum SubscribeCmd {
-    Subscribe,
-}
-
-
-impl Ticker {
-    pub fn price(&self) -> &f64 {
-        match self {
-            Ticker::Full { price, .. } => price,
-            Ticker::Empty { price, .. } => price
-        }
-    }
-
-    pub fn time(&self) -> Option<&DateTime> {
-        match self {
-            Ticker::Full { time, .. } => Some(time),
-            Ticker::Empty { .. } => None,
-        }
-    }
-
-    pub fn sequence(&self) -> &usize {
-        match self {
-            Ticker::Full { sequence, .. } => sequence,
-            Ticker::Empty { sequence, .. } => sequence
-        }
-    }
-
-    pub fn bid(&self) -> Option<&f64> {
-        match self {
-            Ticker::Full { best_bid, .. } => Some(best_bid),
-            Ticker::Empty { .. } => None,
-        }
-    }
-
-    pub fn ask(&self) -> Option<&f64> {
-        match self {
-            Ticker::Full { best_ask, .. } => Some(best_ask),
-            Ticker::Empty { .. } => None,
-        }
-    }
 }
 
 #[derive(Debug, Deserialize, PartialEq, Serialize)]
@@ -746,6 +693,28 @@ pub struct Trade {
     #[serde(deserialize_with = "f64_from_string")]
     pub size: f64,
     pub side: OrderSide,
+}
+
+#[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
+#[serde(untagged)]
+pub enum WSChannel {
+    Name(WSChannelType),
+    WithProduct {
+        name: WSChannelType,
+        product_ids: Vec<String>,
+    },
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
+#[serde(rename_all = "camelCase")]
+pub enum WSChannelType {
+    Full,
+    Heartbeat,
+    Level2,
+    Matches,
+    Status,
+    Ticker,
+    User
 }
 
 #[derive(Debug, Deserialize, PartialEq, Serialize)]
@@ -956,8 +925,22 @@ pub enum WSLevel2 {
     },
     L2update {
         product_id: String,
+        time: DateTime,
         changes: Vec<Level2UpdateRecord>,
     },
+}
+
+#[derive(Debug, Deserialize, PartialEq, Serialize)]
+pub struct WSStatus {
+    pub currencies: Vec<StatusCurrency>,
+}
+
+#[derive(Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename = "subscribe")]
+pub struct WSSubscribe {
+    pub channels: Vec<WSChannel>,
+    #[serde(flatten)]
+    pub auth: Option<Auth>,
 }
 
 #[derive(Debug, Deserialize, PartialEq, Serialize)]
@@ -985,6 +968,43 @@ pub enum WSTicker {
         #[serde(deserialize_with = "f64_nan_from_string")]
         price: f64,
     },
+}
+
+impl WSTicker {
+    pub fn price(&self) -> &f64 {
+        match self {
+            WSTicker::Full { price, .. } => price,
+            WSTicker::Empty { price, .. } => price
+        }
+    }
+
+    pub fn time(&self) -> Option<&DateTime> {
+        match self {
+            WSTicker::Full { time, .. } => Some(time),
+            WSTicker::Empty { .. } => None,
+        }
+    }
+
+    pub fn sequence(&self) -> &usize {
+        match self {
+            WSTicker::Full { sequence, .. } => sequence,
+            WSTicker::Empty { sequence, .. } => sequence
+        }
+    }
+
+    pub fn bid(&self) -> Option<&f64> {
+        match self {
+            WSTicker::Full { best_bid, .. } => Some(best_bid),
+            WSTicker::Empty { .. } => None,
+        }
+    }
+
+    pub fn ask(&self) -> Option<&f64> {
+        match self {
+            WSTicker::Full { best_ask, .. } => Some(best_ask),
+            WSTicker::Empty { .. } => None,
+        }
+    }
 }
 
 #[cfg(test)]

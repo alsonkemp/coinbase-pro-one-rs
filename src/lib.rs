@@ -5,7 +5,7 @@
 extern crate async_std;
 extern crate async_tls;
 extern crate async_tungstenite;
-extern crate chrono;
+// extern crate chrono;
 extern crate crypto;
 extern crate futures;
 extern crate futures_util;
@@ -22,7 +22,7 @@ extern crate url;
 
 
 pub mod book;
-pub mod client;
+pub mod conduit;
 pub mod errors;
 pub mod structs;
 mod utils;

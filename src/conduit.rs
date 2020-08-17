@@ -3,7 +3,6 @@
 use async_std::{ task, stream::interval, sync::{ channel, Arc, Mutex, Receiver, Sender }};
 use async_tungstenite::{ async_std::{ connect_async },
                          tungstenite::{protocol::Message as TMessage }};
-use chrono::
 use crypto::{hmac::Hmac, mac::Mac};
 use futures::{SinkExt, StreamExt};
 use futures_util::{FutureExt};
@@ -21,12 +20,6 @@ const USER_AGENT: &str = concat!("coinbase-pro-one-rs/", env!("CARGO_PKG_VERSION
 
 pub type FnReceiveFn = dyn Fn(Message);
 
-#[derive(Copy, Clone, Debug)]
-pub struct Credentials<'a> {
-    key: &'a str,
-    secret: &'a str,
-    passphrase:&'a str
-}
 
 pub struct Conduit<'a> {
     last_time: u64,
@@ -90,13 +83,13 @@ impl Conduit<'static> {
 
     //////////////////////////////////////////////////////////////
     /// Subscribe a Conduit to the Coinbase WS endpoint.
-    pub async fn subscribe(&mut self, channels: &[Channel]) {
-        let subscribe = Subscribe {
+    pub async fn subscribe(&mut self, channels: &[WSChannel]) {
+        let subscribe = WSSubscribe {
             channels: channels.to_vec(),
             auth: _auth(self.credentials)
         };
 
-        let msg = Message::Subscribe(subscribe);
+        let msg = Message::WSSubscribe(subscribe);
         debug!("Conduit: subscription: sending {:?}", serde_json::to_string(&msg).unwrap());
         self.to_websocket.lock().await.send(msg).await;
     }
@@ -113,10 +106,7 @@ impl Conduit<'static> {
             .header("Content-Type", "Application/JSON");
         if body.is_some() {
             let _body = body.unwrap();
-            let timestamp = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .expect("leap-second")
-                .as_secs();
+            let timestamp = _timestamp();
             let sign = _sign(&self.credentials, timestamp, method, path, &_body);
             let creds = self.credentials.unwrap();
             req = req.header("CB-ACCESS-KEY", creds.key)
@@ -151,8 +141,8 @@ impl Conduit<'static> {
     ///
     pub async fn heartbeat(&mut self) {
         debug!("Conduit: heartbeat...");
-        self.subscribe(&[Channel::WithProduct {
-            name: ChannelType::Heartbeat,
+        self.subscribe(&[WSChannel::WithProduct {
+            name: WSChannelType::Heartbeat,
             product_ids: vec!("BTC-USD".to_string())
         }]
         ).await
@@ -161,7 +151,9 @@ impl Conduit<'static> {
     pub async fn level2(&mut self) {
         debug!("Conduit: level2...");
         self.subscribe(
-            &[Channel::WithProduct { name: ChannelType::Level2, product_ids: vec!("BTC-USD".to_string()) }]
+            &[WSChannel::WithProduct {
+                name: WSChannelType::Level2,
+                product_ids: vec!("BTC-USD".to_string()) }]
         ).await
     }
 
@@ -176,16 +168,13 @@ impl Conduit<'static> {
 
     pub async fn status(&mut self) {
         debug!("Conduit: status...");
-        self.subscribe(&[Channel::Name(ChannelType::Status)]).await;
+        self.subscribe(&[WSChannel::Name(WSChannelType::Status)]).await;
     }
 
     pub async fn ticker(&mut self, product_ids: Vec<String>) {
         debug!("Conduit: ticker...");
         self.subscribe(
-            &[Channel::WithProduct {
-                name: ChannelType::Ticker,
-                product_ids
-            }]
+            &[WSChannel::WithProduct { name: WSChannelType::Ticker, product_ids }]
         ).await;
     }
 
@@ -194,71 +183,16 @@ impl Conduit<'static> {
         self._get("time", "/time").await;
     }
     pub async fn interval(&mut self, millis: u64) {
-       interval(Duration::from_millis(millis)).for_each(||{
-           self.to_mailbox.lock().await.send(Message::Interval{time: SystemTime::now()});
+       interval(Duration::from_millis(millis)).for_each(|_| async {
+           self.to_mailbox.lock().await.send(Message::Interval(now()));
        });
     }
 }
 
-async fn convert_http(txt: String, _type: &str) -> Message {
-    let mut v: Value = serde_json::from_str(txt.as_str()).unwrap();
-    v["type"] = serde_json::Value::String(_type.to_string());
-    serde_json::from_value(v).unwrap_or_else(|e| {
-        Message::InternalError(CBProError::Serde(e.to_string()))
-    })
-}
-
-
-pub fn _timestamp() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("leap-second")
-        .as_secs()
-}
-
-pub fn _sign(&credentials: &Option<Credentials>, ts: u64, method: reqwest::Method, uri: &str, body: &str) -> Option<String> {
-    if credentials.is_none() {
-        return None
-    } else {
-        let key = base64::decode(credentials.clone().unwrap().secret)
-            .expect("base64::decode secret");
-        let mut mac = Hmac::new(crypto::sha2::Sha256::new(), &key);
-        mac.input((ts.to_string() + method.as_str() + uri + body).as_bytes());
-        Some(base64::encode(&mac.result().code()))
-    }
-}
-
-pub fn _auth(credentials: Option<Credentials<'static>>) -> Option<Auth> {
-    match credentials{
-        Some(c) => {
-            debug!("Conduit: calculating auth...");
-            let ts = _timestamp();
-            let signature = _sign(
-                &credentials,
-                ts,
-                reqwest::Method::GET,
-                "/users/self/verify",
-                "");
-            Some(
-                Auth {
-                    signature: signature.unwrap(),
-                    key: c.key.to_string(),
-                    passphrase: c.passphrase.to_string(),
-                    timestamp: ts.to_string()
-                }
-            )
-        },
-        None => {
-            debug!("Conduit: **not** calculating auth... ");
-            None
-        }
-    }
-}
 
 //////////////////////////////////////////////////////////////////////////
 // Websocket
 //////////////////////////////////////////////////////////////////////////
-
 fn handle_websocket(ws_uri:   &'static str,
                           to_mailbox:     Arc<Mutex<Sender<Message>>>,
                           inbox:          Arc<Mutex<Receiver<Message>>>) {
@@ -277,7 +211,6 @@ fn handle_websocket(ws_uri:   &'static str,
                     let tungstenite_msg = ws_read.lock().await.next().await;
                     let conduit_msg = match tungstenite_msg.unwrap() {
                         Ok(TMessage::Text(msg)) => {
-                            debug!("handle_incoming: {:?}\n", &msg);
                             serde_json::from_str(&msg).unwrap_or_else(|e| {
                                 warn!("Can't decode: {:?}", msg);
                                 Message::InternalError(CBProError::Serde(e.to_string()))
@@ -290,7 +223,7 @@ fn handle_websocket(ws_uri:   &'static str,
                     debug!("handle_incoming: {:?}", &conduit_msg);
 
                     match &conduit_msg {
-                        Message::Heartbeat {..} => {
+                        Message::WSHeartbeat {..} => {
                             info!("heartbeat received.\n");
                         },
                         Message::InternalError(e) => {
@@ -322,3 +255,60 @@ fn handle_websocket(ws_uri:   &'static str,
     })());
 }
 
+//////////////////////////////////////////////////////////////////////////
+// HELPERS
+//////////////////////////////////////////////////////////////////////////
+async fn convert_http(txt: String, _type: &str) -> Message {
+    let mut v: Value = serde_json::from_str(txt.as_str()).unwrap();
+    v["type"] = serde_json::Value::String(_type.to_string());
+    serde_json::from_value(v).unwrap_or_else(|e| {
+        Message::InternalError(CBProError::Serde(e.to_string()))
+    })
+}
+
+
+fn _timestamp() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("leap-second")
+        .as_secs()
+}
+
+fn _sign(&credentials: &Option<Credentials>, ts: u64, method: reqwest::Method, uri: &str, body: &str) -> Option<String> {
+    if credentials.is_none() {
+        return None
+    } else {
+        let key = base64::decode(credentials.clone().unwrap().secret)
+            .expect("base64::decode secret");
+        let mut mac = Hmac::new(crypto::sha2::Sha256::new(), &key);
+        mac.input((ts.to_string() + method.as_str() + uri + body).as_bytes());
+        Some(base64::encode(&mac.result().code()))
+    }
+}
+
+fn _auth(credentials: Option<Credentials<'static>>) -> Option<Auth> {
+    match credentials{
+        Some(c) => {
+            debug!("Conduit: calculating auth...");
+            let ts = _timestamp();
+            let signature = _sign(
+                &credentials,
+                ts,
+                reqwest::Method::GET,
+                "/users/self/verify",
+                "");
+            Some(
+                Auth {
+                    signature: signature.unwrap(),
+                    key: c.key.to_string(),
+                    passphrase: c.passphrase.to_string(),
+                    timestamp: ts.to_string()
+                }
+            )
+        },
+        None => {
+            debug!("Conduit: **not** calculating auth... ");
+            None
+        }
+    }
+}
