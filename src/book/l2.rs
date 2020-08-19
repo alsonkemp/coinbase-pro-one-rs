@@ -1,9 +1,12 @@
 
-use async_std::{ sync::{ Receiver }};
+use async_std::{ pin::Pin,
+                 stream::Stream,
+                 sync::{ Receiver }};
 use ordered_float::OrderedFloat;
 use std::{ collections::BTreeMap };
 
 use crate::structs::*;
+use futures_util::stream::BoxStream;
 
 /*
   WS LEVEL 2
@@ -47,17 +50,16 @@ impl OrderBook {
         self.product_id == *pid
     }
 
-    pub async fn harvest(&mut self, strm: &Receiver<Message>) -> Option<Message> {
-        println!("### HARVEST MAP ###");
-        match strm.recv().await.unwrap() {
-            Message::WSSnapshot{product_id: product_id, bids, asks} => {
+    pub async fn harvest(&mut self, msg: Option<Message>) -> Option<Message> {
+        match msg {
+            Some(Message::WSSnapshot{product_id, bids, asks}) => {
                     self.ingest_snapshot(product_id, bids, asks)
             },
-            Message::WSL2update{product_id, time, changes} => {
+            Some(Message::WSL2update{product_id, time, changes}) => {
                     self.ingest_updates(product_id, time, changes)
             },
             msg => {
-                Some(msg)
+                msg
             }
         }
     }
@@ -66,12 +68,12 @@ impl OrderBook {
         if !self.match_product_id(&product_id) {
             Some(Message::WSSnapshot {product_id, bids, asks})
         } else {
-            bids.iter().map(|item| {
+            let _ = bids.iter().map(|item| {
                 self.bid_book.ingest(item.price, item.size);
-            });
-            asks.iter().map(|item| {
+            }).collect::<Vec<_>>();
+            let _ = asks.iter().map(|item| {
                 self.ask_book.ingest(item.price, item.size);
-            });
+            }).collect::<Vec<_>>();
             self.latest_time = now();
             None
         }
@@ -85,12 +87,12 @@ impl OrderBook {
             //Too early...
             None
         } else {
-            changes.iter().map(|item| {
+            let _ = changes.iter().map(|item| {
                 if item.side == OrderSide::Buy {
                     self.bid_book.ingest(item.price, item.size);
                 } else if item.side == OrderSide::Sell {
                     self.ask_book.ingest(item.price, item.size);
-                }});
+                }}).collect::<Vec<_>>();
             self.latest_time = now();
             None
         }

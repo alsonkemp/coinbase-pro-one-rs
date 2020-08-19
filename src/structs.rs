@@ -15,9 +15,10 @@ use crate::errors;
 
 //////////////////////////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////////////////
-// DATETIME HELPERS
+// TYPES AND HELPERS
 //////////////////////////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////////////////
+
 pub type DateTime = chrono::DateTime<chrono::Utc>;
 pub fn now() -> DateTime {
     chrono::Utc::now()
@@ -218,11 +219,11 @@ pub struct Candle(
     pub f64,   // volume
 );
 
-#[derive(Clone, Copy, Debug, Deserialize)]
-pub struct Credentials<'a> {
-    pub key: &'a str,
-    pub secret: &'a str,
-    pub passphrase:&'a str
+#[derive(Clone, Debug, Deserialize)]
+pub struct Credentials {
+    pub key: String,
+    pub secret: String,
+    pub passphrase: String
 }
 
 #[derive(Debug, Deserialize, PartialEq, Serialize)]

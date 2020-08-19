@@ -1,6 +1,7 @@
 #!feature(async_closure)]
 
-use async_std::{ task, stream::interval, sync::{ channel, Arc, Mutex, Receiver, Sender }};
+use async_std::sync::{Arc, Mutex};
+use async_std::{ task, stream::interval, sync::{ channel, Receiver, Sender }};
 use async_tungstenite::{ async_std::{ connect_async },
                          tungstenite::{protocol::Message as TMessage }};
 use crypto::{hmac::Hmac, mac::Mac};
@@ -18,15 +19,12 @@ use crate::errors::{CBProError};
 const CHANNEL_SIZE: usize = 128;
 const USER_AGENT: &str = concat!("coinbase-pro-one-rs/", env!("CARGO_PKG_VERSION"));
 
-pub type FnReceiveFn = dyn Fn(Message);
-
-
 pub struct Conduit<'a> {
     last_time: u64,
     // The Coinbase REST endpoint.  Needed for all RESTy methods.
     base_http_uri: &'a str,
     // Coinbase credentials.
-    credentials: Option<Credentials<'a>>,
+    credentials: Option<Credentials>,
     // To communicate with the 'user' of the library
     to_mailbox:   Arc<Mutex<Sender<Message>>>,
 
@@ -35,7 +33,7 @@ pub struct Conduit<'a> {
 
 impl Conduit<'static> {
     /// Creates a new Conduit
-    pub async fn new(http_uri: &'static str, ws_uri: &'static str, _creds: Option<Credentials<'static>>)
+    pub async fn new(http_uri: &'static str, ws_uri: &'static str, _creds: Option<Credentials>)
                      -> (Conduit<'static>, Receiver<Message>) {
         debug!("Conduit.new: {:?} {:?} {:?}", http_uri, ws_uri, _creds);
         // Creates a new Conduit
@@ -47,7 +45,7 @@ impl Conduit<'static> {
                 passphrase: creds.passphrase
             })
         } else {
-            None
+            Option::None
         };
 
         let (_to_mailbox, mailbox) = channel::<Message>(CHANNEL_SIZE);
@@ -64,14 +62,14 @@ impl Conduit<'static> {
             last_time: _timestamp(),
             base_http_uri: http_uri,
             credentials: credentials.clone(),
-            to_mailbox: to_mailbox,
+            to_mailbox,
             to_websocket: Arc::new(Mutex::new(to_websocket)),
         }, mailbox)
     }
 
     pub fn sign(&self, ts: u64, method: reqwest::Method, uri: &str, body: &str) -> Option<String> {
         if self.credentials.is_none() {
-            return None
+            Option::None
         } else {
             let key = base64::decode(self.credentials.clone().unwrap().secret)
                 .expect("base64::decode secret");
@@ -86,7 +84,7 @@ impl Conduit<'static> {
     pub async fn subscribe(&mut self, channels: &[WSChannel]) {
         let subscribe = WSSubscribe {
             channels: channels.to_vec(),
-            auth: _auth(self.credentials)
+            auth: _auth(self.credentials.clone())
         };
 
         let msg = Message::WSSubscribe(subscribe);
@@ -107,8 +105,8 @@ impl Conduit<'static> {
         if body.is_some() {
             let _body = body.unwrap();
             let timestamp = _timestamp();
-            let sign = _sign(&self.credentials, timestamp, method, path, &_body);
-            let creds = self.credentials.unwrap();
+            let sign = _sign(self.credentials.clone(), timestamp, method, path, &_body);
+            let creds = self.credentials.clone().unwrap();
             req = req.header("CB-ACCESS-KEY", creds.key)
                 .header("CB-ACCESS-SIGN", sign.unwrap())
                 .header("CB-ACCESS-PASSPHRASE", creds.passphrase)
@@ -128,7 +126,7 @@ impl Conduit<'static> {
     }
 
     async fn _get(&mut self, _type: &str, uri: &str) {
-        self._request(reqwest::Method::GET, uri, None, _type).await;
+        self._request(reqwest::Method::GET, uri, Option::None, _type).await;
     }
     async fn _post(&mut self, _type: &str, uri: &str, body: Option<String>) {
         self._request(reqwest::Method::POST, uri, body, _type).await;
@@ -162,10 +160,6 @@ impl Conduit<'static> {
         self._get("products", "/products").await;
     }
 
-    pub async fn snapshot(&mut self, level: u64) {
-
-    }
-
     pub async fn status(&mut self) {
         debug!("Conduit: status...");
         self.subscribe(&[WSChannel::Name(WSChannelType::Status)]).await;
@@ -182,10 +176,13 @@ impl Conduit<'static> {
         debug!("Conduit: time sent...");
         self._get("time", "/time").await;
     }
-    pub async fn interval(&mut self, millis: u64) {
-       interval(Duration::from_millis(millis)).for_each(|_| async {
-           self.to_mailbox.lock().await.send(Message::Interval(now()));
-       });
+    pub fn interval(&mut self, millis: u64) {
+        let to_mailbox = self.to_mailbox.clone();
+        task::spawn((|| async move{
+            interval(Duration::from_millis(millis)).for_each(|_| async {
+                to_mailbox.lock().await.send(Message::Interval(now())).await;
+            }).await;
+        })());
     }
 }
 
@@ -216,18 +213,13 @@ fn handle_websocket(ws_uri:   &'static str,
                                 Message::InternalError(CBProError::Serde(e.to_string()))
                             })},
                         o => {
-                            debug!("Conduit._websocket_handler.handle_incoming: unknown result!!! {:?}\n", o);
+                            debug!("Tungstenite unwrap error: {:?}\n", o);
                             Message::None
                         }
                     };
-                    debug!("handle_incoming: {:?}", &conduit_msg);
-
                     match &conduit_msg {
-                        Message::WSHeartbeat {..} => {
-                            info!("heartbeat received.\n");
-                        },
                         Message::InternalError(e) => {
-                            warn!("handle_incoming INTERNAL ERROR: {:?}", e)
+                            warn!("InternalError: {:?}", e)
                         },
                         _ => {
                             to_mailbox.lock().await.send(conduit_msg).await
@@ -274,9 +266,9 @@ fn _timestamp() -> u64 {
         .as_secs()
 }
 
-fn _sign(&credentials: &Option<Credentials>, ts: u64, method: reqwest::Method, uri: &str, body: &str) -> Option<String> {
+fn _sign(credentials: Option<Credentials>, ts: u64, method: reqwest::Method, uri: &str, body: &str) -> Option<String> {
     if credentials.is_none() {
-        return None
+        Option::None
     } else {
         let key = base64::decode(credentials.clone().unwrap().secret)
             .expect("base64::decode secret");
@@ -286,13 +278,13 @@ fn _sign(&credentials: &Option<Credentials>, ts: u64, method: reqwest::Method, u
     }
 }
 
-fn _auth(credentials: Option<Credentials<'static>>) -> Option<Auth> {
-    match credentials{
+fn _auth(credentials: Option<Credentials>) -> Option<Auth> {
+    match credentials.clone() {
         Some(c) => {
             debug!("Conduit: calculating auth...");
             let ts = _timestamp();
             let signature = _sign(
-                &credentials,
+                credentials,
                 ts,
                 reqwest::Method::GET,
                 "/users/self/verify",

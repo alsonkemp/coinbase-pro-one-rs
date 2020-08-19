@@ -12,6 +12,9 @@ keywords = [ "async", "exchange", "coinbase", "bitcoin", "websocket" ]
 homepage = "https://github.com/alsonkemp/coinbase-pro-one-rs"
 publish = false
 
+[profile.release]
+opt-level = "s"
+
 [dependencies]
 async-tls = "0.9.0"
 async-tungstenite = {version = "*", features = ["async-std-runtime", "async-tls"] }

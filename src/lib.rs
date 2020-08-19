@@ -20,13 +20,11 @@ extern crate time;
 extern crate uuid;
 extern crate url;
 
-
 pub mod book;
 pub mod conduit;
 pub mod errors;
 pub mod structs;
 mod utils;
-
 
 pub const MAIN_URL: &str = "https://api.pro.coinbase.com";
 pub const SANDBOX_URL: &str = "https://api-public.sandbox.pro.coinbase.com";
