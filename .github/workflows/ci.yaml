@@ -19,8 +19,8 @@ jobs:
           cache-name: cache-rust-target
         with:
           path: |
-          ~/target
-          ~/.cargo
+            ~/target
+            ~/.cargo
           key: ${{ runner.os }}-build-${{ env.cache-name }}
           restore-keys: |
                ${{ runner.os }}-build-${{ env.cache-name }}-
