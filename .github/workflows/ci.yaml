@@ -13,6 +13,17 @@ jobs:
         with:
           toolchain: nightly
           override: true
+      - name: Cache rust target
+        uses: actions/cache@v2
+        env:
+          cache-name: cache-rust-target
+        with:
+          path: ~/target
+          key: ${{ runner.os }}-build-${{ env.cache-name }}
+          restore-keys: |
+               ${{ runner.os }}-build-${{ env.cache-name }}-
+               ${{ runner.os }}-build-
+               ${{ runner.os }}-
       - uses: actions-rs/cargo@v1
         with:
           command: build
