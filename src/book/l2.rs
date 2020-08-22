@@ -1,12 +1,8 @@
-
-use async_std::{ pin::Pin,
-                 stream::Stream,
-                 sync::{ Receiver }};
 use ordered_float::OrderedFloat;
 use std::{ collections::BTreeMap };
 
-use crate::structs::*;
-use futures_util::stream::BoxStream;
+use crate::structs;
+
 
 /*
   WS LEVEL 2
@@ -23,7 +19,7 @@ pub struct OrderBook {
     pub product_id: String,
     pub bid_book: SideBook,
     pub ask_book: SideBook,
-    pub latest_time: DateTime
+    pub latest_time: structs::DateTime
 }
 
 impl SideBook {
@@ -42,7 +38,7 @@ impl OrderBook {
             product_id,
             bid_book: SideBook(BTreeMap::new()),
             ask_book: SideBook(BTreeMap::new()),
-            latest_time: now()
+            latest_time: structs::now()
         }
     }
 
@@ -50,23 +46,13 @@ impl OrderBook {
         self.product_id == *pid
     }
 
-    pub async fn harvest(&mut self, msg: Option<Message>) -> Option<Message> {
-        match msg {
-            Some(Message::WSSnapshot{product_id, bids, asks}) => {
-                    self.ingest_snapshot(product_id, bids, asks)
-            },
-            Some(Message::WSL2update{product_id, time, changes}) => {
-                    self.ingest_updates(product_id, time, changes)
-            },
-            msg => {
-                msg
-            }
-        }
-    }
 
-    fn ingest_snapshot(&mut self, product_id: String, bids: Vec<Level2SnapshotRecord>, asks: Vec<Level2SnapshotRecord>) -> Option<Message> {
+    fn ingest_snapshot(&mut self,
+                       product_id: String,
+                       bids: Vec<structs::Level2SnapshotRecord>,
+                       asks: Vec<structs::Level2SnapshotRecord>) -> Option<structs::Message> {
         if !self.match_product_id(&product_id) {
-            Some(Message::WSSnapshot {product_id, bids, asks})
+            Some(structs::Message::WSSnapshot {product_id, bids, asks})
         } else {
             let _ = bids.iter().map(|item| {
                 self.bid_book.ingest(item.price, item.size);
@@ -74,27 +60,46 @@ impl OrderBook {
             let _ = asks.iter().map(|item| {
                 self.ask_book.ingest(item.price, item.size);
             }).collect::<Vec<_>>();
-            self.latest_time = now();
             None
         }
     }
 
-    fn ingest_updates(&mut self, product_id: String, time: DateTime, changes: Vec<Level2UpdateRecord>) -> Option<Message> {
+    fn ingest_updates(&mut self,
+                      product_id: String,
+                      time: structs::DateTime,
+                      changes: Vec<structs::Level2UpdateRecord>) -> Option<structs::Message> {
         if !self.match_product_id(&product_id) {
             debug!("product_ids don't match: {:?} {:?}", self.product_id, product_id);
-            Some(Message::WSL2update { product_id, time, changes })
+            Some(structs::Message::WSL2update { product_id, time, changes })
         } else if self.latest_time > time {
             //Too early...
+            debug!("Update too early... {:?}", time);
             None
         } else {
             let _ = changes.iter().map(|item| {
-                if item.side == OrderSide::Buy {
+                if item.side == structs::OrderSide::Buy {
                     self.bid_book.ingest(item.price, item.size);
-                } else if item.side == OrderSide::Sell {
+                } else if item.side == structs::OrderSide::Sell {
                     self.ask_book.ingest(item.price, item.size);
                 }}).collect::<Vec<_>>();
-            self.latest_time = now();
+            self.latest_time = time;
             None
+        }
+    }
+}
+
+impl super::MsgHarvester for OrderBook {
+    fn harvest(&mut self, msg: structs::Message) -> Option<structs::Message> {
+        match msg {
+            structs::Message::WSSnapshot{product_id, bids, asks} => {
+                self.ingest_snapshot(product_id, bids, asks)
+            },
+            structs::Message::WSL2update{product_id, time, changes} => {
+                self.ingest_updates(product_id, time, changes)
+            },
+            msg => {
+                Some(msg)
+            }
         }
     }
 }

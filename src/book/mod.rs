@@ -1,11 +1,9 @@
 use crate::structs;
-use async_std::sync::Receiver;
+use std::borrow::BorrowMut;
 
 pub mod l2;
 pub mod l3;
 pub mod ticker;
-const MAX_SIZE: usize = 1<<20; //1M
-type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug)]
 pub enum Error {
@@ -13,4 +11,17 @@ pub enum Error {
     MatchUuid,
     Range,
     TestFail
+}
+
+pub fn harvest(msg: structs::Message, harvesters: Vec<&mut Box<dyn MsgHarvester>>) -> Option<structs::Message> {
+    harvesters.into_iter().fold(Some(msg), |msg, mut h| {
+        match msg {
+            Some(m) => { h.harvest(m) },
+            None => None
+        }
+    })
+}
+
+pub trait MsgHarvester {
+    fn harvest(&mut self, msg: structs::Message) -> Option<structs::Message>;
 }

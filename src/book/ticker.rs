@@ -1,5 +1,3 @@
-use async_std::sync::Receiver;
-
 use crate::structs;
 
 //{ best_ask: 11920.0, best_bid: 11919.99, last_size: 0.00142629, price: 11920.0,
@@ -15,7 +13,6 @@ pub struct Ticker {
     time: structs::DateTime,
     trade_id: usize
 }
-
 impl Ticker {
     pub fn new(product_id: String) -> Self {
         Self {
@@ -30,11 +27,13 @@ impl Ticker {
             trade_id: 0
         }
     }
-    pub async fn harvest(&mut self, msg: Option<structs::Message>) -> Option<structs::Message> {
+}
+
+impl super::MsgHarvester for Ticker {
+    fn harvest(&mut self, msg: structs::Message) -> Option<structs::Message> {
         match msg {
-            Some(
-                structs::Message::WSTicker(
-                    structs::WSTicker::Full { best_ask, best_bid, last_size, price, product_id, sequence, side, time, trade_id })) => {
+            structs::Message::WSTicker(
+                structs::WSTicker::Full { best_ask, best_bid, last_size, price, product_id, sequence, side, time, trade_id }) => {
                 self.best_ask = best_ask;
                 self.best_bid = best_bid;
                 self.last_size = last_size;
@@ -46,16 +45,15 @@ impl Ticker {
                 self.trade_id = trade_id;
                 None
             },
-            Some(
-                structs::Message::WSTicker(
-                    structs::WSTicker::Empty { sequence, product_id, price })) =>{
+            structs::Message::WSTicker(
+                structs::WSTicker::Empty { sequence, product_id, price }) => {
                 self.sequence = sequence;
                 self.product_id = product_id;
                 self.price = price;
+                debug!("Harvested ticker...");
                 None
             }
-            _ => msg
+            _ => Some(msg)
         }
-
     }
 }

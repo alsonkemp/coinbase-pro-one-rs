@@ -1,12 +1,8 @@
 
-use async_std::{ sync::{ Receiver }};
 use ordered_float::OrderedFloat;
 use std::{ collections::BTreeMap,
            time::SystemTime };
-use uuid::Uuid;
 
-use super::*;
-use crate::structs::*;
 
 type SideBook = BTreeMap<OrderedFloat<f64>, f64>;
 
