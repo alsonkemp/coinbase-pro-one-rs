@@ -34,11 +34,11 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let mut ticker: Box<dyn MsgHarvester> = Box::new(book::ticker::Ticker::new("BTC-USD".to_string()));
         let product_ids = vec!("BTC-USD".to_string());
 
-        conduit.interval(2500);      // NONE
-        conduit.level2().await;            // WS
-        conduit.ticker(product_ids).await; // WS
-        conduit.time().await;              // HTTP
-        conduit.heartbeat().await;         // WS
+        conduit.interval(2500);                 // NONE
+        conduit.level(structs::Level::Level2).await;  // WS
+        conduit.ticker(product_ids).await;            // WS
+        conduit.time().await;                         // HTTP
+        conduit.heartbeat().await;                    // WS
         while let msg = mailbox.recv().await {
             match msg {
                 Err(e) => debug!("Match _msg err: {:?}", e),

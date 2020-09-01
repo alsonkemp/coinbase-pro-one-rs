@@ -3,7 +3,6 @@
 #![feature(format_args_capture)]
 
 extern crate async_std;
-extern crate async_tls;
 extern crate async_tungstenite;
 // extern crate chrono;
 extern crate crypto;
@@ -13,9 +12,9 @@ extern crate futures_util;
 extern crate log;
 extern crate ordered_float;
 extern crate pretty_env_logger;
-extern crate reqwest;
 extern crate serde;
 extern crate serde_json;
+extern crate surf;
 extern crate time;
 extern crate uuid;
 extern crate url;

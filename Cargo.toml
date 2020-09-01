@@ -16,7 +16,7 @@ publish = false
 opt-level = "s"
 
 [dependencies]
-async-tungstenite = { version = "0.8.0",         default-features = false, features = ["async-std-runtime", "real-async-native-tls"] }
+async-tungstenite = { version = "0.8.0",         default-features = false, features = ["async-std-runtime", "async-native-tls"] }
 async-std         = { version = "1.6.3",         default-features = false, features = [ "std", "unstable" ] }
 base64            = { version = "0.12.3",        default-features = false}
 chrono            = { version = "0.4.15",        default-features = false, features = [ "alloc", "clock", "serde", "std" ] }
@@ -29,7 +29,7 @@ pretty_env_logger = { version = "0.4.0",         default-features = false }
 rust-crypto       = { version = "0.2.36",        default-features = false }
 serde             = { version = "1.0.115",       default-features = false, features = [ "derive" ] }
 serde_json        = { version = "1.0.57",        default-features = false }
-surf              = { version = "2.0.0-alpha.4", default-features = false }
+surf              = { version = "2.0.0-alpha.4", default-features = false, features = [ "native-client" ] }
 time              = { version = "0.2.16",        default-features = false }
 url               = { version = "2.1.1",         default-features = false }
 uuid              = { version = "0.8.1",         default-features = false,features = [ "serde", "v4" ] }

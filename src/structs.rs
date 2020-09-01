@@ -153,61 +153,6 @@ pub struct Auth {
     pub timestamp: String,
 }
 
-#[derive(Debug, Deserialize, PartialEq, Serialize)]
-pub struct Book<T> {
-    pub sequence: usize,
-    pub bids: Vec<T>,
-    pub asks: Vec<T>,
-}
-
-pub trait BookLevel {
-    fn level() -> u8;
-}
-
-#[derive(Debug, Deserialize, PartialEq, Serialize)]
-pub struct BookRecordL1 {
-    #[serde(deserialize_with = "f64_from_string")]
-    pub price: f64,
-    #[serde(deserialize_with = "f64_from_string")]
-    pub size: f64,
-    pub num_orders: usize,
-}
-
-impl BookLevel for BookRecordL1 {
-    fn level() -> u8 {
-        1
-    }
-}
-
-#[derive(Debug, Deserialize, PartialEq, Serialize)]
-pub struct BookRecordL2 {
-    #[serde(deserialize_with = "f64_from_string")]
-    pub price: f64,
-    #[serde(deserialize_with = "f64_from_string")]
-    pub size: f64,
-    pub num_orders: usize,
-}
-
-impl BookLevel for BookRecordL2 {
-    fn level() -> u8 {
-        2
-    }
-}
-
-#[derive(Debug, Deserialize, PartialEq, Serialize)]
-pub struct BookRecordL3 {
-    #[serde(deserialize_with = "f64_from_string")]
-    pub price: f64,
-    #[serde(deserialize_with = "f64_from_string")]
-    pub size: f64,
-    pub order_id: Uuid,
-}
-
-impl BookLevel for BookRecordL3 {
-    fn level() -> u8 {
-        3
-    }
-}
 
 #[derive(Debug, Deserialize, PartialEq, Serialize)]
 pub struct Candle(
@@ -216,7 +161,7 @@ pub struct Candle(
     pub f64, // high
     pub f64, // open
     pub f64, // close
-    pub f64,   // volume
+    pub f64, // volume
 );
 
 #[derive(Clone, Debug, Deserialize)]
@@ -268,6 +213,11 @@ pub enum Granularity {
     D1 = 86400,
 }
 
+pub enum Level {
+    // Level1,  // Meh...  Why bother...
+    Level2 = 2,
+    Level3 = 3
+}
 #[derive(Debug, Deserialize, PartialEq, Serialize)]
 pub struct Level2SnapshotRecord {
     #[serde(deserialize_with = "f64_from_string")]
@@ -308,7 +258,7 @@ pub enum Message {
     None,
     Time(Time),
     #[serde(rename = "full")]
-    WSFull(WSFull),
+    WSLevel3(WSLevel3),
     #[serde(rename = "heartbeat")]
     WSHeartbeat {
         sequence: usize,
@@ -718,57 +668,75 @@ pub enum WSChannelType {
     User
 }
 
+
 #[derive(Debug, Deserialize, PartialEq, Serialize)]
-pub enum WSFull {
-    Activate(WSFullActivate),
-    Change(WSFullChange),
-    Done(WSFullDone),
-    Match(WSFullMatch),
-    Open(WSFullOpen),
-    Received(WSFullReceived),
+#[serde(tag = "type")]
+pub enum WSLevel2 {
+    Snapshot {
+        product_id: String,
+        bids: Vec<Level2SnapshotRecord>,
+        asks: Vec<Level2SnapshotRecord>,
+    },
+    L2update {
+        product_id: String,
+        time: DateTime,
+        changes: Vec<Level2UpdateRecord>,
+    },
 }
 
-impl WSFull {
+// Note: this is really the "full" channel but it fits better
+// in the API as "Level3" (since it's kinda actually Level3) so here we are.
+#[derive(Debug, Deserialize, PartialEq, Serialize)]
+pub enum WSLevel3 {
+    Activate(WSLevel3Activate),
+    Change(WSLevel3Change),
+    Done(WSLevel3Done),
+    Match(WSLevel3Match),
+    Open(WSLevel3Open),
+    Received(WSLevel3Received),
+}
+
+impl WSLevel3 {
     pub fn price(&self) -> Option<&f64> {
         match self {
-            WSFull::Activate(WSFullActivate { .. }) => None,
-            WSFull::Change(WSFullChange { price, .. }) => price.as_ref(),
-            WSFull::Done(WSFullDone::Limit { price, .. }) => Some(price),
-            WSFull::Done(WSFullDone::Market { .. }) => None,
-            WSFull::Match(WSFullMatch { price, .. }) => Some(price),
-            WSFull::Open(WSFullOpen { price, .. }) => Some(price),
-            WSFull::Received(WSFullReceived::Limit { price, .. }) => Some(price),
-            WSFull::Received(WSFullReceived::Market { .. }) => None,
+            WSLevel3::Activate(WSLevel3Activate { .. }) => None,
+            WSLevel3::Change(WSLevel3Change { price, .. }) => price.as_ref(),
+            WSLevel3::Done(WSLevel3Done::Limit { price, .. }) => Some(price),
+            WSLevel3::Done(WSLevel3Done::Market { .. }) => None,
+            WSLevel3::Match(WSLevel3Match { price, .. }) => Some(price),
+            WSLevel3::Open(WSLevel3Open { price, .. }) => Some(price),
+            WSLevel3::Received(WSLevel3Received::Limit { price, .. }) => Some(price),
+            WSLevel3::Received(WSLevel3Received::Market { .. }) => None,
         }
     }
 
     pub fn time(&self) -> Option<&DateTime> {
         match self {
-            WSFull::Activate(WSFullActivate { .. }) => None,
-            WSFull::Change(WSFullChange { time, .. }) => Some(time),
-            WSFull::Done(WSFullDone::Limit { time, .. }) => Some(time),
-            WSFull::Done(WSFullDone::Market { time, .. }) => Some(time),
-            WSFull::Match(WSFullMatch { time, .. }) => Some(time),
-            WSFull::Open(WSFullOpen { time, .. }) => Some(time),
-            WSFull::Received(WSFullReceived::Limit { time, .. }) => Some(time),
-            WSFull::Received(WSFullReceived::Market { time, .. }) => Some(time),
+            WSLevel3::Activate(WSLevel3Activate { .. }) => None,
+            WSLevel3::Change(WSLevel3Change { time, .. }) => Some(time),
+            WSLevel3::Done(WSLevel3Done::Limit { time, .. }) => Some(time),
+            WSLevel3::Done(WSLevel3Done::Market { time, .. }) => Some(time),
+            WSLevel3::Match(WSLevel3Match { time, .. }) => Some(time),
+            WSLevel3::Open(WSLevel3Open { time, .. }) => Some(time),
+            WSLevel3::Received(WSLevel3Received::Limit { time, .. }) => Some(time),
+            WSLevel3::Received(WSLevel3Received::Market { time, .. }) => Some(time),
         }
     }
 
     pub fn sequence(&self) -> Option<&usize> {
         match self {
-            WSFull::Activate(WSFullActivate { .. }) => None,
-            WSFull::Change(WSFullChange { sequence, .. }) => Some(sequence),
-            WSFull::Done(WSFullDone::Limit { sequence, .. }) => sequence.as_ref(),
-            WSFull::Done(WSFullDone::Market { sequence, .. }) => Some(sequence),
-            WSFull::Match(WSFullMatch { sequence, .. }) => Some(sequence),
-            WSFull::Open(WSFullOpen { sequence, .. }) => Some(sequence),
-            WSFull::Received(WSFullReceived::Limit { sequence, .. }) => Some(sequence),
-            WSFull::Received(WSFullReceived::Market { sequence, .. }) => Some(sequence),
+            WSLevel3::Activate(WSLevel3Activate { .. }) => None,
+            WSLevel3::Change(WSLevel3Change { sequence, .. }) => Some(sequence),
+            WSLevel3::Done(WSLevel3Done::Limit { sequence, .. }) => sequence.as_ref(),
+            WSLevel3::Done(WSLevel3Done::Market { sequence, .. }) => Some(sequence),
+            WSLevel3::Match(WSLevel3Match { sequence, .. }) => Some(sequence),
+            WSLevel3::Open(WSLevel3Open { sequence, .. }) => Some(sequence),
+            WSLevel3::Received(WSLevel3Received::Limit { sequence, .. }) => Some(sequence),
+            WSLevel3::Received(WSLevel3Received::Market { sequence, .. }) => Some(sequence),
         }
     }
 }#[derive(Debug, Deserialize, PartialEq, Serialize)]
-pub struct WSFullActivate {
+pub struct WSLevel3Activate {
     pub product_id: String,
     #[serde(deserialize_with = "f64_from_string")]
     pub timestamp: f64,
@@ -788,7 +756,7 @@ pub struct WSFullActivate {
 }
 #[derive(Debug, Deserialize, PartialEq, Serialize)]
 #[serde(untagged)]
-pub enum WSFullDone {
+pub enum WSLevel3Done {
     Limit {
         time: DateTime,
         product_id: String,
@@ -816,7 +784,7 @@ pub enum WSFullDone {
 }
 
 #[derive(Debug, Deserialize, PartialEq, Serialize)]
-pub struct WSFullChange {
+pub struct WSLevel3Change {
     pub time: DateTime,
     pub sequence: usize,
     pub order_id: Uuid,
@@ -842,7 +810,7 @@ pub struct WSFullChange {
 }
 
 #[derive(Debug, Deserialize, PartialEq, Serialize)]
-pub struct WSFullMatch {
+pub struct WSLevel3Match {
     pub sequence: usize,
     pub maker_order_id: Uuid,
     pub taker_order_id: Uuid,
@@ -865,7 +833,7 @@ pub struct WSFullMatch {
 }
 
 #[derive(Debug, Deserialize, PartialEq, Serialize)]
-pub struct WSFullOpen {
+pub struct WSLevel3Open {
     pub order_id: Uuid,
     #[serde(deserialize_with = "f64_from_string")]
     pub price: f64,
@@ -884,7 +852,7 @@ pub struct WSFullOpen {
 #[derive(Debug, Deserialize, PartialEq, Serialize)]
 #[serde(tag = "order_type")]
 #[serde(rename_all = "camelCase")]
-pub enum WSFullReceived {
+pub enum WSLevel3Received {
     Limit {
         product_id: String,
         sequence: usize,
@@ -913,21 +881,6 @@ pub enum WSFullReceived {
         sequence: usize,
         side: OrderSide,
         time: DateTime,
-    },
-}
-
-#[derive(Debug, Deserialize, PartialEq, Serialize)]
-#[serde(tag = "type")]
-pub enum WSLevel2 {
-    Snapshot {
-        product_id: String,
-        bids: Vec<Level2SnapshotRecord>,
-        asks: Vec<Level2SnapshotRecord>,
-    },
-    L2update {
-        product_id: String,
-        time: DateTime,
-        changes: Vec<Level2UpdateRecord>,
     },
 }
 

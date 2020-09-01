@@ -7,10 +7,9 @@ use async_tungstenite::{ async_std::{ connect_async },
 use crypto::{hmac::Hmac, mac::Mac};
 use futures::{SinkExt, StreamExt};
 use futures_util::{FutureExt};
-use reqwest::blocking::{Client};
 use serde_json;
-use serde_json::Value;
 use std::{time::{ Duration, SystemTime, UNIX_EPOCH }};
+use surf;
 
 // LOCAL IMPORTS
 use crate::structs::*;
@@ -67,15 +66,37 @@ impl Conduit<'static> {
         }, mailbox)
     }
 
-    pub fn sign(&self, ts: u64, method: reqwest::Method, uri: &str, body: &str) -> Option<String> {
-        if self.credentials.is_none() {
-            Option::None
-        } else {
-            let key = base64::decode(self.credentials.clone().unwrap().secret)
-                .expect("base64::decode secret");
-            let mut mac = Hmac::new(crypto::sha2::Sha256::new(), &key);
-            mac.input((ts.to_string() + method.as_str() + uri + body).as_bytes());
-            Some(base64::encode(&mac.result().code()))
+    pub fn sign(&self, method: surf::http_types::Method, uri: &str, body: Option<serde_json::Value>) -> (String, u64) {
+        let ts = _timestamp();
+        let secret = base64::decode(&self.credentials.clone().unwrap().secret).expect("base64::decode secret");
+        let mut mac = Hmac::new(crypto::sha2::Sha256::new(), &secret);
+        // Make the borrow_checker happy...
+        let mut unwrapped_body: String = match body {
+            None => String::from(""),
+            Some(v) => v.to_string()
+        };
+        mac.input((ts.to_string() + method.as_ref() + uri + unwrapped_body.as_str()).as_bytes());
+        (base64::encode(&mac.result().code()), ts)
+    }
+
+    fn auth(&self, method: surf::http_types::Method, path: &str, body: Option<serde_json::Value>) -> Option<Auth> {
+        match &self.credentials {
+            Some(c) => {
+                debug!("Conduit: calculating auth...");
+                let (signature, ts) = self.sign(method, path, body);
+                Some(
+                    Auth {
+                        signature: signature,
+                        key: c.key.to_string(),
+                        passphrase: c.passphrase.to_string(),
+                        timestamp: ts.to_string()
+                    }
+                )
+            },
+            None => {
+                debug!("Conduit: **not** calculating auth... ");
+                None
+            }
         }
     }
 
@@ -84,7 +105,7 @@ impl Conduit<'static> {
     pub async fn subscribe(&mut self, channels: &[WSChannel]) {
         let subscribe = WSSubscribe {
             channels: channels.to_vec(),
-            auth: _auth(self.credentials.clone())
+            auth: self.auth(surf::http_types::Method::Get, "/users/self/verify", None)
         };
 
         let msg = Message::WSSubscribe(subscribe);
@@ -96,41 +117,46 @@ impl Conduit<'static> {
     ///
     ///
     ///
-    async fn _request(&mut self, method: reqwest::Method, path: &str, body: Option<String>, _type: &str) {
-        debug!("Conduit: _request: {:?} {:?} {:?}", &method, &path, &body);
-        let mut req = Client::new()
-            .request(method.clone(), &format!("{}{}", self.base_http_uri, path))
-            .header("User-Agent", USER_AGENT)
-            .header("Content-Type", "Application/JSON");
+    async fn _request(&mut self,
+                      method: surf::http_types::Method,
+                      serde_type: &str,
+                      path: &str,
+                      body: Option<serde_json::Value>) {
+        debug!("Conduit: _request: {:?} {:?} {:?} {:?}", &method, path, &body, serde_type);
+        let mut req =
+            surf::Request::new(
+                method,
+                url::Url::parse(&*format!("{}{}", self.base_http_uri, path)).unwrap()
+            ).set_header("User-Agent", USER_AGENT);
         if body.is_some() {
-            let _body = body.unwrap();
-            let timestamp = _timestamp();
-            let sign = _sign(self.credentials.clone(), timestamp, method, path, &_body);
-            let creds = self.credentials.clone().unwrap();
-            req = req.header("CB-ACCESS-KEY", creds.key)
-                .header("CB-ACCESS-SIGN", sign.unwrap())
-                .header("CB-ACCESS-PASSPHRASE", creds.passphrase)
-                .header("CB-ACCESS-TIMESTAMP", &timestamp.to_string());
-            req = req.body(_body);
+            let auth = self.auth(method, path, body.clone()).unwrap();
+            req = req.set_header("CB-ACCESS-KEY", auth.key)
+               .set_header("CB-ACCESS-SIGN", auth.signature)
+               .set_header("CB-ACCESS-PASSPHRASE", auth.passphrase)
+               .set_header("CB-ACCESS-TIMESTAMP", auth.timestamp.to_string())
+               .body_json(&body).unwrap();
         }
+        // Can't yet convert to a `Message` because we haven't applied the serde_type yet...
+        let resp = req.recv_string().await;
 
-        let resp = Client::new().execute(req.build().unwrap());
-        let msg = if resp.is_err() {
-            Message::InternalError(CBProError::Http(resp.err().unwrap().to_string()))
+        let msg = if !(resp.is_err()) {
+            let mut _resp = serde_json::from_str::<serde_json::Value>(resp.unwrap().as_str()).unwrap();
+            _resp["type"] = serde_json::Value::String(serde_type.to_string());
+            serde_json::from_value(_resp).unwrap_or_else(|e| {
+                Message::InternalError(CBProError::Serde(e.to_string()))
+            })
         } else {
-            let _resp = resp.unwrap().text().unwrap();
-            debug!("RESP: {:?}", &_resp);
-            convert_http(_resp, _type).await
+            Message::InternalError(CBProError::Http(resp.err().unwrap().to_string()))
         };
         self.to_mailbox.lock().await.send(msg).await;
     }
 
-    async fn _get(&mut self, _type: &str, uri: &str) {
-        self._request(reqwest::Method::GET, uri, Option::None, _type).await;
+    async fn _get(&mut self, serde_type: &str, uri: &str) {
+        self._request(surf::http_types::Method::Get, serde_type, uri, Option::None).await;
     }
-    async fn _post(&mut self, _type: &str, uri: &str, body: Option<String>) {
-        self._request(reqwest::Method::POST, uri, body, _type).await;
-    }
+    // async fn _post(&mut self, _type: &str, uri: &str, body: Option<String>) {
+    //     self._request(surf::http_types::Method::Post, uri, body, _type).await;
+    // }
 
 
     /// **Core Requests**
@@ -146,13 +172,30 @@ impl Conduit<'static> {
         ).await
     }
 
-    pub async fn level2(&mut self) {
-        debug!("Conduit: level2...");
-        self.subscribe(
-            &[WSChannel::WithProduct {
-                name: WSChannelType::Level2,
-                product_ids: vec!("BTC-USD".to_string()) }]
-        ).await
+    pub async fn level(&mut self, level: Level) {
+        debug!("Conduit: level...");
+        match level {
+            Level::Level2 => self.subscribe(
+                        &[WSChannel::WithProduct {
+                                name: WSChannelType::Level2,
+                                product_ids: vec!("BTC-USD".to_string())
+                                }]
+                            ).await,
+            Level::Level3 => {
+                panic!("NOT IMPLEMENTED...");
+                self.subscribe(
+                    &[WSChannel::WithProduct {
+                        name: WSChannelType::Full,
+                        product_ids: vec!("BTC-USD".to_string())
+                    }]
+                ).await;
+            }
+        };
+    }
+
+    pub async fn order_book(&mut self, level: Level) {
+        debug!("Conduit: order_book sent...");
+        self._get("products", "/products").await;
     }
 
     pub async fn products(&mut self) {
@@ -190,9 +233,9 @@ impl Conduit<'static> {
 //////////////////////////////////////////////////////////////////////////
 // Websocket
 //////////////////////////////////////////////////////////////////////////
-fn handle_websocket(ws_uri:   &'static str,
-                          to_mailbox:     Arc<Mutex<Sender<Message>>>,
-                          inbox:          Arc<Mutex<Receiver<Message>>>) {
+fn handle_websocket(ws_uri:      &'static str,
+                    to_mailbox:  Arc<Mutex<Sender<Message>>>,
+                    inbox:       Arc<Mutex<Receiver<Message>>>) {
     task::spawn((|| async move{
         let (_ws, _) = connect_async(ws_uri)
             .await
@@ -208,6 +251,7 @@ fn handle_websocket(ws_uri:   &'static str,
                     let tungstenite_msg = ws_read.lock().await.next().await;
                     let conduit_msg = match tungstenite_msg.unwrap() {
                         Ok(TMessage::Text(msg)) => {
+                            trace!("handle_incoming: {:?}\n", &msg);
                             serde_json::from_str(&msg).unwrap_or_else(|e| {
                                 warn!("Can't decode: {:?}", msg);
                                 Message::InternalError(CBProError::Serde(e.to_string()))
@@ -250,15 +294,6 @@ fn handle_websocket(ws_uri:   &'static str,
 //////////////////////////////////////////////////////////////////////////
 // HELPERS
 //////////////////////////////////////////////////////////////////////////
-async fn convert_http(txt: String, _type: &str) -> Message {
-    let mut v: Value = serde_json::from_str(txt.as_str()).unwrap();
-    v["type"] = serde_json::Value::String(_type.to_string());
-    serde_json::from_value(v).unwrap_or_else(|e| {
-        Message::InternalError(CBProError::Serde(e.to_string()))
-    })
-}
-
-
 fn _timestamp() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -266,41 +301,3 @@ fn _timestamp() -> u64 {
         .as_secs()
 }
 
-fn _sign(credentials: Option<Credentials>, ts: u64, method: reqwest::Method, uri: &str, body: &str) -> Option<String> {
-    if credentials.is_none() {
-        Option::None
-    } else {
-        let key = base64::decode(credentials.clone().unwrap().secret)
-            .expect("base64::decode secret");
-        let mut mac = Hmac::new(crypto::sha2::Sha256::new(), &key);
-        mac.input((ts.to_string() + method.as_str() + uri + body).as_bytes());
-        Some(base64::encode(&mac.result().code()))
-    }
-}
-
-fn _auth(credentials: Option<Credentials>) -> Option<Auth> {
-    match credentials.clone() {
-        Some(c) => {
-            debug!("Conduit: calculating auth...");
-            let ts = _timestamp();
-            let signature = _sign(
-                credentials,
-                ts,
-                reqwest::Method::GET,
-                "/users/self/verify",
-                "");
-            Some(
-                Auth {
-                    signature: signature.unwrap(),
-                    key: c.key.to_string(),
-                    passphrase: c.passphrase.to_string(),
-                    timestamp: ts.to_string()
-                }
-            )
-        },
-        None => {
-            debug!("Conduit: **not** calculating auth... ");
-            None
-        }
-    }
-}
